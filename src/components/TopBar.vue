@@ -1,10 +1,38 @@
 <script setup>
+import { ref, onMounted, onUnmounted } from "vue";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useMonitorStore } from "../store/monitor";
 import { useRelativeTime } from "../composables/useRelativeTime";
 import FileMenuDropdown from "./FileMenuDropdown.vue";
 
 const store = useMonitorStore();
 const syncedAgo = useRelativeTime(() => store.lastSyncedAt);
+
+const appWindow = getCurrentWindow();
+const isMaximized = ref(false);
+let unlistenResize;
+
+async function syncMaximized() {
+  isMaximized.value = await appWindow.isMaximized();
+}
+
+onMounted(async () => {
+  await syncMaximized();
+  unlistenResize = await appWindow.onResized(syncMaximized);
+});
+onUnmounted(() => {
+  unlistenResize?.();
+});
+
+function minimizeWindow() {
+  appWindow.minimize();
+}
+function toggleMaximizeWindow() {
+  appWindow.toggleMaximize();
+}
+function closeWindow() {
+  appWindow.close();
+}
 
 const NAV = [
   { id: "monitor", label: "Monitor" },
@@ -16,7 +44,7 @@ const NAV = [
 </script>
 
 <template>
-  <div class="topbar">
+  <div class="topbar" data-tauri-drag-region>
     <div class="topbar-icons">
       <div class="dropdown-anchor">
         <button class="icon-btn" title="Menu" @click="store.toggleFileMenu()"><i class="ph ph-list"></i></button>
@@ -44,9 +72,11 @@ const NAV = [
     </div>
     <div class="alert-badge"><i class="ph ph-warning"></i>2 alerts firing</div>
     <div class="window-controls">
-      <button class="icon-btn" title="Minimize"><i class="ph ph-minus"></i></button>
-      <button class="icon-btn" title="Maximize"><i class="ph ph-square"></i></button>
-      <button class="icon-btn" title="Close"><i class="ph ph-x"></i></button>
+      <button class="icon-btn" title="Minimize" @click="minimizeWindow"><i class="ph ph-minus"></i></button>
+      <button class="icon-btn" title="Maximize" @click="toggleMaximizeWindow">
+        <i :class="isMaximized ? 'ph ph-corners-in' : 'ph ph-corners-out'"></i>
+      </button>
+      <button class="icon-btn" title="Close" @click="closeWindow"><i class="ph ph-x"></i></button>
     </div>
   </div>
 </template>
