@@ -58,7 +58,7 @@ onUnmounted(() => store.stopAutoResync());
         <option value="">All sources ({{ store.sources.length }})</option>
         <option v-for="source in store.sources" :key="source.id" :value="source.id">{{ source.label }}</option>
       </select>
-      <details ref="resyncMenu" class="resync-picker" @keydown.esc="resyncMenu.removeAttribute('open'); resyncMenu.querySelector('summary').focus()">
+      <details v-if="false" ref="resyncMenu" class="resync-picker">
         <summary class="chip accent" aria-label="Resync settings">
           <i class="ph" :class="store.isSyncing ? 'ph-spinner spin' : 'ph-arrows-clockwise'"></i>
           {{ store.isSyncing ? "Syncing..." : "Resync · " + intervalLabel }}<i class="ph ph-caret-down"></i>

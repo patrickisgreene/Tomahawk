@@ -12,6 +12,11 @@ import { joinLocalPath, localPathCrumbs } from "../data/localPath";
 
 const MAX_HISTORY = 60;
 const SAVED_QUERIES_KEY = "tomahawk.savedQueries";
+const WORKSPACES_KEY = "tomahawk.workspaces";
+function loadWorkspaces() {
+  try { const value = JSON.parse(localStorage.getItem(WORKSPACES_KEY) || "null"); return Array.isArray(value) && value.length ? value : null; } catch { return null; }
+}
+function saveWorkspaces(value) { try { localStorage.setItem(WORKSPACES_KEY, JSON.stringify(value)); } catch {} }
 const PANEL_SIZES_KEY = "tomahawk.panelSizes";
 const PANEL_SIZES_DEFAULTS = { left: 272, right: 306, bottom: 244, mix: 322, throughput: 184, talkers: 196 };
 const PANEL_SIZE_LIMITS = {
@@ -135,7 +140,9 @@ export const useMonitorStore = defineStore("monitor", {
     // ---- top-level navigation ----
     // "Explore" has no design yet (turn 1-7 never covered it) — ExplorePage.vue
     // says so honestly rather than faking a page for it.
-    currentPage: "monitor", // monitor | explore | reports | alerts | hosts
+    currentPage: "monitor",
+    workspaces: loadWorkspaces() || [{ id: "monitor", name: "Analyze", dockTabs: null, dockActiveTab: null }],
+    activeWorkspaceId: "monitor",
 
     // ---- access log / resync ----
     // Real sources start with an empty tail — filled in by the first
@@ -202,8 +209,8 @@ export const useMonitorStore = defineStore("monitor", {
       bottom: ["query", "alerts"],
       inspector: ["inspector", "history"],
       sources: ["sources", "saved"],
-      talkers: ["talkers"],
-      throughput: ["throughput"],
+      talkers: [],
+      throughput: ["talkers", "throughput"],
       mix: ["mix"],
     },
     dockActiveTab: {
@@ -211,8 +218,8 @@ export const useMonitorStore = defineStore("monitor", {
       bottom: "query",
       inspector: "inspector",
       sources: "sources",
-      talkers: "talkers",
-      throughput: "throughput",
+      talkers: null,
+      throughput: "talkers",
       mix: "mix",
     },
 
@@ -437,6 +444,47 @@ export const useMonitorStore = defineStore("monitor", {
     },
     toggleSort() {
       this.tailSortDesc = !this.tailSortDesc;
+    },
+    workspaceSnapshot() {
+      return { dockTabs: JSON.parse(JSON.stringify(this.dockTabs)), dockActiveTab: JSON.parse(JSON.stringify(this.dockActiveTab)) };
+    },
+    saveWorkspaceState() {
+      const current = this.workspaces.find((w) => w.id === this.activeWorkspaceId);
+      if (!current) return;
+      Object.assign(current, this.workspaceSnapshot());
+      saveWorkspaces(this.workspaces);
+    },
+    createWorkspace() {
+      this.saveWorkspaceState();
+      const id = `workspace-${Date.now()}`;
+      const snapshot = this.workspaceSnapshot();
+      this.workspaces.push({ id, name: `Monitor ${this.workspaces.length}`, ...snapshot });
+      this.activeWorkspaceId = id;
+      this.loadWorkspace(id);
+      saveWorkspaces(this.workspaces);
+      return id;
+    },
+    loadWorkspace(id) {
+      const workspace = this.workspaces.find((w) => w.id === id);
+      if (!workspace) return;
+      this.saveWorkspaceState();
+      this.activeWorkspaceId = id;
+      if (workspace.dockTabs) this.dockTabs = JSON.parse(JSON.stringify(workspace.dockTabs));
+      if (workspace.dockActiveTab) this.dockActiveTab = JSON.parse(JSON.stringify(workspace.dockActiveTab));
+      saveWorkspaces(this.workspaces);
+    },
+    renameWorkspace(id, name) {
+      const workspace = this.workspaces.find((w) => w.id === id);
+      if (!workspace || !name.trim()) return;
+      workspace.name = name.trim(); saveWorkspaces(this.workspaces);
+    },
+    removeWorkspace(id) {
+      if (id === "monitor" || this.workspaces.length === 1) return;
+      const index = this.workspaces.findIndex((w) => w.id === id);
+      if (index < 0) return;
+      this.workspaces.splice(index, 1);
+      if (this.activeWorkspaceId === id) this.loadWorkspace(this.workspaces[Math.max(0, index - 1)].id);
+      saveWorkspaces(this.workspaces);
     },
 togglePanel(side) {
       if (!Object.hasOwn(this.panelVisibility, side)) return;

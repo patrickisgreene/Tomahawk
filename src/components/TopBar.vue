@@ -1,13 +1,21 @@
 <script setup>
-import { ref, onMounted, onUnmounted } from "vue";
+import { ref, computed, onMounted, onUnmounted } from "vue";
 import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, PanelBottomClose, PanelBottomOpen } from "@lucide/vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useMonitorStore } from "../store/monitor";
 import { useRelativeTime } from "../composables/useRelativeTime";
 import FileMenuDropdown from "./FileMenuDropdown.vue";
+import { classifyRequest } from "../data/classification";
 
 const store = useMonitorStore();
 const syncedAgo = useRelativeTime(() => store.lastSyncedAt);
+const securityWarningCount = computed(() => store.tailRows.reduce((count, row) => count + classifyRequest(row).length, 0));
+const securityHighCount = computed(() => store.tailRows.reduce((count, row) => count + classifyRequest(row).filter((tag) => tag.severity === "high").length, 0));
+// Kept as a single UI flag so the updater can populate it once an update
+// endpoint/signing configuration is provided.
+const updateAvailable = ref(false);
+const intervals = [[10000, "Every 10 seconds"], [30000, "Every 30 seconds"], [60000, "Every minute"], [300000, "Every 5 minutes"]];
+const intervalLabel = computed(() => store.resyncIntervalMs < 60000 ? store.resyncIntervalMs / 1000 + "s" : store.resyncIntervalMs / 60000 + "m");
 
 const appWindow = getCurrentWindow();
 const isMaximized = ref(false);
@@ -34,6 +42,9 @@ function toggleMaximizeWindow() {
 function closeWindow() {
   appWindow.close();
 }
+function newWorkspace() { store.createWorkspace(); }
+function rename(item) { const name = window.prompt("Workspace name", item.name); if (name) store.renameWorkspace(item.id, name); }
+function openSecurityAlerts() { store.panelVisibility.bottom = true; store.dockActiveTab.bottom = "alerts"; }
 
 const PANEL_TOGGLES = [
   { side: "left", close: PanelLeftClose, open: PanelLeftOpen },
@@ -44,6 +55,10 @@ const PANEL_TOGGLES = [
 const NAV = [
   { id: "monitor", label: "Monitor" },
 ];
+// Migrate the original built-in name for users who already have saved state.
+if (store.workspaces.length && store.workspaces[0].id === "monitor" && store.workspaces[0].name === "Monitor") {
+  store.renameWorkspace("monitor", "Analyze");
+}
 </script>
 
 <template>
@@ -63,22 +78,28 @@ const NAV = [
       </button>
       <button class="icon-btn" title="Settings" @click="store.openSettingsDialog()"><i class="ph ph-gear-six"></i></button>
     </div>
-    <button class="tail-state" @click="store.resyncNow()" title="Pull the latest lines now">
+    <details class="resync-picker header-resync">
+      <summary class="tail-state" title="Resync settings">
       <i class="ph ph-arrows-clockwise"></i>
       <span>Resync</span>
       <span class="caret">▾</span>
-    </button>
+      </summary>
+      <div class="resync-options">
+        <button class="chip accent" :disabled="store.isSyncing" @click="store.resyncNow()">Resync now</button>
+        <fieldset><legend>Automatic resync</legend><label v-for="[value, label] in intervals" :key="value"><input type="radio" name="header-resync-interval" :value="value" :checked="store.resyncIntervalMs === value" @change="store.setResyncInterval(value)">{{ label }}</label></fieldset>
+      </div>
+    </details>
     <div class="topbar-nav">
       <button class="icon-btn" title="Search everything" @click="store.openGlobalSearch()"><i class="ph ph-magnifying-glass"></i></button>
-      <span
-        v-for="item in NAV"
-        :key="item.id"
-        :class="{ current: store.currentPage === item.id }"
-        @click="store.setPage(item.id)"
-      >{{ item.label }}</span>
-      <i class="ph ph-plus"></i>
+      <span v-for="item in store.workspaces" :key="item.id"
+        :class="{ current: store.activeWorkspaceId === item.id }"
+        @dblclick="rename(item)" @click="store.loadWorkspace(item.id)">{{ item.name }}<b v-if="item.id !== 'monitor'" class="workspace-close" @click.stop="store.removeWorkspace(item.id)">×</b></span>
+      <button class="icon-btn" title="New workspace" @click="newWorkspace"><i class="ph ph-plus"></i></button>
     </div>
-    <div class="alert-badge"><i class="ph ph-warning"></i>2 alerts firing</div>
+    <button v-if="securityWarningCount" class="alert-badge security-badge" :class="{ 'has-high': securityHighCount }" @click="openSecurityAlerts" title="Open classified security warnings">
+      <i class="ph ph-shield-warning"></i>{{ securityWarningCount.toLocaleString() }} security warning{{ securityWarningCount === 1 ? '' : 's' }}
+    </button>
+    <button v-if="updateAvailable" class="warning-badge" title="An app update is available"><i class="ph ph-download-simple"></i>Update available</button>
     <div class="window-controls">
       <button class="icon-btn" title="Minimize" @click="minimizeWindow"><i class="ph ph-minus"></i></button>
       <button class="icon-btn" title="Maximize" @click="toggleMaximizeWindow">

@@ -1,7 +1,7 @@
 <script setup>
 import Dock from "./Dock.vue";
 import Splitter from "./Splitter.vue";
-import { computed } from "vue";
+import { computed, watch } from "vue";
 import { useMonitorStore } from "../store/monitor";
 const store = useMonitorStore();
 const columns = computed(() => [
@@ -9,6 +9,7 @@ const columns = computed(() => [
   "minmax(0, 1fr)",
   ...(store.panelVisibility.right ? ["5px", `${store.panelSizes.right}px`] : []),
 ].join(" "));
+watch(() => [store.dockTabs, store.dockActiveTab, store.panelVisibility], () => store.saveWorkspaceState(), { deep: true });
 </script>
 
 <template>
@@ -17,13 +18,11 @@ const columns = computed(() => [
       id="monitor-left"
       v-show="store.panelVisibility.left"
       class="col-left"
-      :style="{ gridTemplateRows: `minmax(0, 1fr) 5px ${store.panelSizes.throughput}px 5px ${store.panelSizes.talkers}px` }"
+      :style="{ gridTemplateRows: `minmax(0, 1fr) 5px ${store.panelSizes.throughput}px` }"
     >
       <Dock dock-id="sources" />
       <Splitter axis="height" target="throughput" invert />
       <Dock dock-id="throughput" />
-      <Splitter axis="height" target="talkers" invert />
-      <Dock dock-id="talkers" />
     </div>
     <Splitter v-show="store.panelVisibility.left" axis="width" target="left" />
     <div

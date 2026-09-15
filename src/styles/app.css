@@ -33,17 +33,27 @@
 
   /* ===== topbar ===== */
   .topbar{display:flex;align-items:center;gap:6px;height:34px;padding:0 8px;background:var(--chrome-bg);border-bottom:1px solid var(--chrome-border);flex:none}
-  .topbar-icons{display:flex;align-items:center;gap:2px;color:var(--color-neutral-500);font-size:14px}
+  .topbar-icons{display:flex;align-items:center;gap:1px;color:var(--color-neutral-500);font-size:14px}
   .icon-btn{width:22px;height:22px;display:grid;place-items:center;border-radius:var(--radius-sm);background:transparent;border:none;cursor:pointer;color:inherit}
   .icon-btn:hover{background:var(--color-neutral-800);color:var(--color-text)}
-  .panel-toggle.is-visible{color:var(--color-accent-300);background:var(--color-accent-800)}
+  .topbar-icons .icon-btn{width:20px;height:22px;padding:0;display:grid;place-items:center}
+  .panel-toggle.is-visible{color:var(--color-neutral-500);background:transparent}
+  .panel-toggle svg{display:block}
   .panel-toggle:focus-visible{outline:1px solid var(--color-accent-400);outline-offset:2px}
   .col-mid{min-width:0}
   .tail-state{display:flex;align-items:center;gap:6px;height:22px;padding:0 9px;margin-left:4px;border:1px solid var(--color-accent);border-radius:var(--radius-sm);color:var(--color-accent-300);font:500 11px/1 var(--font-body);cursor:pointer;background:transparent}
   .topbar-nav{display:flex;align-items:center;gap:14px;margin:0 auto;font:400 11.5px/1 var(--font-body);color:var(--color-neutral-500)}
   .topbar-nav span{cursor:pointer}
-  .topbar-nav .current{color:var(--color-text);font-weight:500;box-shadow:inset 0 -2px 0 var(--color-accent);padding-bottom:9px}
+  .topbar-nav span{display:inline-flex;align-items:center;gap:4px}
+  .workspace-close{font-size:12px;font-weight:400;color:var(--color-neutral-600);cursor:pointer}
+  .workspace-close:hover{color:var(--st5)}
+  .topbar-nav span{height:22px;line-height:22px}
+  .topbar-nav .current{color:var(--color-text);font-weight:500;box-shadow:inset 0 -2px 0 var(--color-accent);padding-bottom:0}
   .alert-badge{display:flex;align-items:center;gap:6px;height:20px;padding:0 9px;border-radius:999px;background:#3a2530;border:1px solid var(--danger-border);color:var(--st5);font:500 10.5px/1 var(--font-body);cursor:pointer}
+  .security-badge{white-space:nowrap}
+  .warning-badge{display:flex;align-items:center;gap:6px;height:20px;padding:0 9px;border-radius:999px;background:#3a3325;border:1px solid var(--warn-border);color:var(--st4);font:500 10.5px/1 var(--font-body);cursor:pointer;white-space:nowrap}
+  .warning-badge:hover,.warning-badge:focus-visible{background:#4a402d;color:#f0c58d;outline:none}
+  .warning-badge.has-high{border-color:#8a603b}
   .window-controls{display:flex;gap:2px;color:var(--color-neutral-500);font-size:12px;margin-left:6px}
 
   /* ===== main grid ===== */
@@ -57,7 +67,7 @@
   .splitter:hover::after,.splitter.dragging::after{background:var(--color-accent-800)}
   .splitter:hover,.splitter.dragging{color:var(--color-accent-300)}
 
-  .col-left{min-height:0;display:grid;grid-template-rows:1fr 5px 184px 5px 196px}
+  .col-left{min-height:0;display:grid;grid-template-rows:1fr 5px 196px}
   .col-mid{min-height:0;display:grid;grid-template-rows:1fr 5px 244px}
   .col-mid-bottom{min-height:0;display:grid;grid-template-columns:1fr 5px 322px}
 
@@ -211,6 +221,9 @@
   .alert-row .dot{width:6px;height:6px;border-radius:50%;flex:none}
   .alert-row .title{font:500 10.5px/1.3 var(--font-body);color:var(--color-neutral-200)}
   .alert-row .age{margin-left:auto;font:400 9.5px ui-monospace,Menlo,monospace;color:var(--color-neutral-500)}
+  .alert-row{width:100%;text-align:left;background:transparent;color:inherit;cursor:pointer}
+  .alerts-empty{padding:10px;color:var(--color-neutral-500);font-size:10.5px}
+  .alert-clear{justify-content:center;color:var(--color-accent-300)}
 
   /* ===== status mix ===== */
   .mix-grid{flex:1;min-height:0;display:grid;grid-template-columns:repeat(5,1fr);gap:5px;padding:7px}
@@ -275,6 +288,10 @@
   .statusbar .live{display:flex;align-items:center;gap:5px;color:var(--st2)}
   .statusbar .push{margin-left:auto;display:flex;align-items:center;gap:5px}
   .statusbar .accent{color:var(--color-accent-300)}
+  .statusbar .status-error{color:var(--st5);cursor:help}
+  .status-error-tip{position:relative}
+  .status-error-popover{display:none;position:absolute;right:0;bottom:22px;z-index:20;width:360px;max-height:120px;overflow:auto;padding:8px 10px;border:1px solid var(--danger-border);border-radius:var(--radius-sm);background:var(--chrome-bg);box-shadow:var(--shadow-sm);font:400 10px/1.4 ui-monospace,Menlo,monospace;color:var(--color-neutral-200);white-space:pre-wrap;overflow-wrap:anywhere}
+  .status-error-tip:hover .status-error-popover,.status-error-tip:focus .status-error-popover{display:block}
 
   /* ===== resync toolbar bits (AccessLogPanel) ===== */
   .synced-label{font:400 10px/1 ui-monospace,Menlo,monospace;color:var(--color-neutral-600);white-space:nowrap}
@@ -453,3 +470,5 @@
   .alert-history{display:flex;flex-direction:column;gap:5px}
   .alert-history-row{display:flex;justify-content:space-between;font:400 11px/1.4 ui-monospace,Menlo,monospace;color:var(--color-neutral-400)}
   .alert-detail-actions{margin-top:auto;display:flex;gap:8px;padding-top:14px}
+\n.toolbar-select,.toolbar-search{height:24px;background:var(--chrome-bg-2);border:1px solid var(--chrome-border-2);border-radius:4px;color:var(--color-neutral-200);font:11px var(--font-body);padding:0 7px;min-width:92px}.toolbar-select.compact{min-width:72px}.toolbar-search{min-width:120px;outline:none}.traffic-summary{font-size:10px;color:var(--color-neutral-500);margin-left:auto;white-space:nowrap}
+.toolbar-select{appearance:none;-webkit-appearance:none;background-color:var(--chrome-bg-2);background-image:linear-gradient(45deg,transparent 50%,var(--color-neutral-500) 50%),linear-gradient(135deg,var(--color-neutral-500) 50%,transparent 50%);background-position:calc(100% - 10px) 10px,calc(100% - 6px) 10px;background-size:4px 4px,4px 4px;background-repeat:no-repeat;padding-right:20px}.toolbar-select option{background:var(--chrome-bg-2);color:var(--color-neutral-200)}
