@@ -1,104 +1,130 @@
 <script setup>
-import { computed, onMounted, onUnmounted } from "vue";
+import { computed, ref, onMounted, onUnmounted } from "vue";
 import { useMonitorStore } from "../store/monitor";
 import { useRelativeTime } from "../composables/useRelativeTime";
-import { statusColor, msColor, fmtMs, fmtBytes } from "../data/format";
+import { statusColor, fmtMs, fmtBytes, formatLocalTimestamp } from "../data/format";
 
 const store = useMonitorStore();
 const syncedAgo = useRelativeTime(() => store.lastSyncedAt);
-const sourceCountLabel = computed(() => `${store.sources.length} source${store.sources.length === 1 ? "" : "s"}`);
-// tailLoading only covers the one-time startup hydrate — also show the
-// skeleton for the *first* sync after a source is added mid-session
-// (tail still empty, but a sync is actively running).
-const showTailSkeleton = computed(() => store.tailLoading || (store.isSyncing && store.tailRows.length === 0));
-
-const INTERVALS = [10000, 30000, 60000, 300000];
-function intervalLabel(ms) {
-  return ms < 60000 ? `Every ${ms / 1000}s` : `Every ${ms / 60000}m`;
+const resyncMenu = ref(null);
+const intervals = [[10000, "Every 10 seconds"], [30000, "Every 30 seconds"], [60000, "Every minute"], [300000, "Every 5 minutes"]];
+const intervalLabel = computed(() => store.resyncIntervalMs < 60000 ? store.resyncIntervalMs / 1000 + "s" : store.resyncIntervalMs / 60000 + "m");
+const domains = computed(() => {
+  const values = store.tailRows
+    .filter((row) => !store.tailSourceId || row.id.startsWith(store.tailSourceId + ":"))
+    .map((row) => row.hostname?.toLowerCase()).filter((host) => host && host !== "-");
+  if (store.tailDomain) values.push(store.tailDomain);
+  return [...new Set(values)].sort();
+});
+function closeResyncMenu(event) {
+  if (!resyncMenu.value?.contains(event.target)) resyncMenu.value?.removeAttribute("open");
 }
-function cycleInterval() {
-  const i = INTERVALS.indexOf(store.resyncIntervalMs);
-  store.setResyncInterval(INTERVALS[(i + 1) % INTERVALS.length]);
+onMounted(() => document.addEventListener("pointerdown", closeResyncMenu));
+onUnmounted(() => document.removeEventListener("pointerdown", closeResyncMenu));
+const loading = computed(() => store.tailLoading || (store.isSyncing && !store.tailRows.length));
+const columns = [
+  ["timestamp", "Timestamp (local)", 220], ["ip", "Client", 160],
+  ["hostname", "Hostname", 180], ["method", "Method", 70],
+  ["status", "Status", 60], ["path", "Request path", 340],
+  ["bytes", "Bytes", 75], ["protocol", "Protocol", 90],
+  ["referer", "Referer", 240], ["userAgent", "User agent", 300],
+  ["forwardedFor", "X-Forwarded-For", 180], ["ident", "Ident", 100],
+  ["authUser", "Authenticated user", 150], ["request", "Full request", 340],
+  ["filePath", "Source file", 300], ["ms", "Duration", 90],
+];
+const selectedColumns = ref(["timestamp", "ip", "hostname", "method", "status", "path", "bytes", "protocol"]);
+const visibleColumns = computed(() => columns.filter(([key]) => selectedColumns.value.includes(key)));
+const gridStyle = computed(() => ({
+  gridTemplateColumns: visibleColumns.value.map(([, , width]) => `${width}px`).join(" "),
+}));
+function valueFor(row, key) {
+  if (key === "bytes") return fmtBytes(row.bytes);
+  if (key === "ms") return fmtMs(row.ms);
+  if (key === "timestamp") return formatLocalTimestamp(row.ts);
+  return row[key] || "-";
 }
-
 onMounted(async () => {
   await store.hydrateTailRows();
   store.startAutoResync();
 });
 onUnmounted(() => store.stopAutoResync());
-
-function onFilterKeydown(e) {
-  if (e.key === "Enter") store.setTailFilter(e.target.value);
-}
 </script>
 
 <template>
-  <div class="panel-fill">
-    <div class="toolbar">
-      <div class="chip txt"><i class="ph ph-stack"></i>{{ sourceCountLabel }}<span class="caret">▾</span></div>
-      <button class="chip accent" :disabled="store.isSyncing" @click="store.resyncNow()">
-        <i class="ph" :class="store.isSyncing ? 'ph-spinner spin' : 'ph-arrows-clockwise'"></i>
-        {{ store.isSyncing ? (store.syncProgress ? `Syncing ${store.syncProgress.completed}/${store.syncProgress.total}` : "Syncing…") : "Resync" }}
-      </button>
-      <button class="chip" @click="cycleInterval">{{ intervalLabel(store.resyncIntervalMs) }}<span class="caret">▾</span></button>
+  <div class="panel-fill access-panel">
+    <div class="toolbar access-toolbar">
+      <div class="access-controls">
+      <select class="chip" aria-label="Source" v-model="store.tailSourceId">
+        <option value="">All sources ({{ store.sources.length }})</option>
+        <option v-for="source in store.sources" :key="source.id" :value="source.id">{{ source.label }}</option>
+      </select>
+      <details ref="resyncMenu" class="resync-picker" @keydown.esc="resyncMenu.removeAttribute('open'); resyncMenu.querySelector('summary').focus()">
+        <summary class="chip accent" aria-label="Resync settings">
+          <i class="ph" :class="store.isSyncing ? 'ph-spinner spin' : 'ph-arrows-clockwise'"></i>
+          {{ store.isSyncing ? "Syncing..." : "Resync · " + intervalLabel }}<i class="ph ph-caret-down"></i>
+        </summary>
+        <div class="resync-options">
+          <button class="chip accent" :disabled="store.isSyncing" @click="store.resyncNow()">{{ store.isSyncing ? "Syncing..." : "Resync now" }}</button>
+          <fieldset>
+            <legend>Automatic resync</legend>
+            <label v-for="[value, label] in intervals" :key="value">
+              <input type="radio" name="access-resync-interval" :value="value" :checked="store.resyncIntervalMs === value" @change="store.setResyncInterval(value)">{{ label }}
+            </label>
+          </fieldset>
+        </div>
+      </details>
+      <select class="chip" aria-label="Domain" v-model="store.tailDomain" title="Filter domains in loaded rows">
+        <option value="">All domains</option>
+        <option v-for="domain in domains" :key="domain" :value="domain">{{ domain }}</option>
+      </select>
       <span class="synced-label">synced {{ syncedAgo }}</span>
-      <div class="sep"></div>
-      <div class="chip"><i class="ph ph-clock-counter-clockwise" style="color:var(--color-neutral-600)"></i>15m</div>
-      <div class="chip"><span style="color:var(--color-neutral-600)">buffer</span>5000</div>
-      <div class="chip"><span style="color:var(--color-neutral-600)">≥</span>200</div>
-      <div class="sep"></div>
+      <select class="chip" aria-label="Time window relative to newest loaded entry" v-model.number="store.tailWindowMs">
+        <option :value="0">All loaded times</option><option :value="900000">Last 15m of log</option>
+        <option :value="3600000">Last hour of log</option><option :value="86400000">Last day of log</option>
+      </select>
+      <select class="chip" aria-label="Loaded row limit" :disabled="loading || store.isSyncing" :value="store.tailLimit" @change="store.setTailLimit(Number($event.target.value))">
+        <option :value="400">400 rows</option><option :value="1000">1,000 rows</option><option :value="5000">5,000 rows</option>
+      </select>
+      <select class="chip" aria-label="Minimum status" v-model.number="store.tailMinStatus">
+        <option :value="0">All statuses</option><option :value="200">Status >= 200</option>
+        <option :value="300">Status >= 300</option><option :value="400">Status >= 400</option><option :value="500">Status >= 500</option>
+      </select>
+      </div>
       <div class="filterbar">
-        <i class="ph ph-funnel" style="color:var(--color-accent-400)"></i>
-        <input :value="store.tailFilterText" @keydown="onFilterKeydown" placeholder='status&gt;=400 and path ~ &quot;/checkout&quot;'>
-        <span class="kbd">⌘K</span>
+        <i class="ph ph-funnel"></i>
+        <input :value="store.tailFilterText" @input="store.setTailFilter($event.target.value)" aria-label="Search loaded log fields" placeholder="Search all log fields...">
+        <button v-if="store.tailFilterText" class="icon-btn" aria-label="Clear search" @click="store.setTailFilter('')"><i class="ph ph-x"></i></button>
       </div>
-      <div class="chip txt">Combined<span class="caret">▾</span></div>
-      <i class="ph ph-text-align-left" style="color:var(--color-neutral-600)"></i>
-      <i class="ph ph-eye" style="color:var(--color-neutral-600)"></i>
-      <i class="ph ph-download-simple" style="color:var(--color-neutral-600)"></i>
+      <details class="column-picker">
+        <summary class="chip">Columns</summary>
+        <div class="column-options">
+          <label v-for="[key, label] in columns" :key="key">
+            <input type="checkbox" :value="key" v-model="selectedColumns" :disabled="selectedColumns.length === 1 && selectedColumns.includes(key)">{{ label }}
+          </label>
+        </div>
+      </details>
     </div>
-    <div v-if="store.syncProgress" class="sync-progress-bar">
-      <div :style="{ width: (store.syncProgress.completed / store.syncProgress.total * 100) + '%' }"></div>
-    </div>
-
-    <div class="stream-tabstrip">
-      <div class="stream-tab active"><i class="ph ph-file-text"></i>shop · access.log<span class="close">×</span></div>
-      <div class="stream-tab"><i class="ph ph-file-text"></i>api · access.log</div>
-      <button class="dock-add" style="margin:0"><i class="ph ph-plus" style="font-size:10px"></i></button>
-      <i class="ph ph-corners-out" style="margin-left:auto;color:var(--color-neutral-600)"></i>
-    </div>
-
-    <div class="tail-head">
-      <span class="sortable" @click="store.toggleSort()">Time<i class="ph" :class="store.tailSortDesc ? 'ph-caret-down' : 'ph-caret-up'"></i></span>
-      <span>Client</span><span>Method</span><span>St</span><span>Request</span><span>Bytes</span><span>µs</span>
-    </div>
-    <div v-if="showTailSkeleton" class="tail-body">
-      <div v-for="i in 8" :key="i" class="tail-row skel">
-        <span class="skel-bar" style="width:60%"></span><span class="skel-bar" style="width:80%"></span>
-        <span class="skel-bar" style="width:55%"></span><span class="skel-bar" style="width:40%"></span>
-        <span class="skel-bar" style="width:75%"></span><span class="skel-bar" style="width:50%"></span>
-        <span class="skel-bar" style="width:45%"></span>
+    <div v-if="store.syncProgress" class="sync-progress-bar"><div :style="{ width: store.syncProgress.completed / store.syncProgress.total * 100 + '%' }"></div></div>
+    <div v-if="store.syncError" role="alert" class="access-message">{{ store.syncError }}</div>
+    <div class="access-scroll">
+      <div class="access-table">
+        <div class="tail-head" :style="gridStyle">
+          <span v-for="[key, label] in visibleColumns" :key="key">
+            <button v-if="key === 'timestamp'" class="time-sort" @click="store.toggleSort()">{{ label }}<i class="ph" :class="store.tailSortDesc ? 'ph-caret-down' : 'ph-caret-up'"></i></button>
+            <template v-else>{{ label }}</template>
+          </span>
+        </div>
+        <template v-if="loading">
+          <div v-for="i in 8" :key="i" class="tail-row skel" :style="gridStyle"><span v-for="[key] in visibleColumns" :key="key" class="skel-bar"></span></div>
+        </template>
+        <template v-else>
+          <div v-for="row in store.filteredTailRows" :key="row.id" class="tail-row" :style="gridStyle" :class="{ selected: row.id === store.selectedRowId, 'is-error': row.status >= 500 }" @click="store.selectRow(row.id)">
+            <span v-for="[key] in visibleColumns" :key="key" :title="String(row[key] ?? '')" :style="key === 'status' ? { color: statusColor(row.status) } : {}">{{ valueFor(row, key) }}</span>
+          </div>
+        </template>
       </div>
+      <div v-if="!loading && !store.filteredTailRows.length" class="access-message">No loaded rows match the current filters.</div>
     </div>
-    <div v-else class="tail-body">
-      <div
-        v-for="r in store.filteredTailRows"
-        :key="r.id"
-        class="tail-row"
-        :class="{ selected: r.id === store.selectedRowId, 'is-error': r.status >= 500 }"
-        @click="store.selectRow(r.id)"
-      >
-        <span style="color:var(--color-neutral-600)">{{ r.time }}</span>
-        <span style="color:var(--color-neutral-400)">{{ r.ip }}</span>
-        <span style="color:var(--color-accent-2-400)">{{ r.method }}</span>
-        <span :style="{ color: statusColor(r.status), fontWeight: 600 }">{{ r.status }}</span>
-        <span class="req">{{ r.path }}</span>
-        <span style="color:var(--color-neutral-600)">{{ fmtBytes(r.bytes) }}</span>
-        <span class="ms" :style="{ color: msColor(r.ms) }">{{ fmtMs(r.ms) }}</span>
-      </div>
-    </div>
-    <div class="tail-foot">
-      <span>{{ store.filteredTailRows.length.toLocaleString() }} rows matched</span>
-    </div>
+    <div class="tail-foot"><span>{{ store.filteredTailRows.length.toLocaleString() }} matched / {{ store.tailRows.length.toLocaleString() }} loaded rows</span></div>
   </div>
 </template>

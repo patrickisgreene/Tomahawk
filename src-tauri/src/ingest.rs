@@ -57,7 +57,18 @@ fn save_cursor(conn: &Connection, file_path: &str, byte_offset: i64, size: i64, 
 /// skipped entirely on future polls, since rotated archives never change.
 pub fn ingest_access_file(conn: &mut Connection, source_id: &str, path: &Path) -> Result<Vec<AccessLogRow>, String> {
     let path_str = path.to_string_lossy().to_string();
-    let cursor = load_cursor(conn, &path_str);
+    let mut cursor = load_cursor(conn, &path_str);
+    // Older parsers silently consumed unsupported files. Retry those files
+    // after an upgrade without duplicating any successfully imported rows.
+    if cursor.byte_offset > 0 || cursor.done {
+        let has_rows: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM access_rows WHERE file_path = ?1)",
+            [&path_str], |row| row.get(0),
+        ).map_err(|e| e.to_string())?;
+        if !has_rows {
+            cursor = Cursor { byte_offset: 0, done: false };
+        }
+    }
     let metadata = std::fs::metadata(path).map_err(|e| e.to_string())?;
     let size = metadata.len() as i64;
 
@@ -67,13 +78,14 @@ pub fn ingest_access_file(conn: &mut Connection, source_id: &str, path: &Path) -
 
     let gzip = is_gzip(path)?;
     let mut new_rows = Vec::new();
+    let mut nonempty_lines = 0usize;
 
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     {
         let mut insert = tx
             .prepare(
-                "INSERT INTO access_rows (file_path, ts, ip, method, status, path, bytes, ms, referer, user_agent, raw)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                "INSERT INTO access_rows (file_path, ts, ip, method, status, path, bytes, ms, referer, user_agent, raw, hostname, forwarded_for, ident, auth_user, timestamp, request, protocol)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
             )
             .map_err(|e| e.to_string())?;
 
@@ -81,11 +93,19 @@ pub fn ingest_access_file(conn: &mut Connection, source_id: &str, path: &Path) -
             insert
                 .execute(rusqlite::params![
                     path_str, parsed.ts, parsed.ip, parsed.method, parsed.status, parsed.path, parsed.bytes, parsed.ms,
-                    parsed.referer, parsed.user_agent, raw
+                    parsed.referer, parsed.user_agent, raw, parsed.hostname, parsed.forwarded_for, parsed.ident, parsed.auth_user, parsed.timestamp, parsed.request, parsed.protocol
                 ])
                 .map_err(|e| e.to_string())?;
             let rowid = tx.last_insert_rowid();
             new_rows.push(AccessLogRow {
+                hostname: parsed.hostname,
+                forwarded_for: parsed.forwarded_for,
+                ident: parsed.ident,
+                auth_user: parsed.auth_user,
+                timestamp: parsed.timestamp,
+                request: parsed.request,
+                protocol: parsed.protocol,
+
                 id: format!("{source_id}:{rowid}"),
                 file_path: path_str.clone(),
                 ts: parsed.ts,
@@ -117,6 +137,7 @@ pub fn ingest_access_file(conn: &mut Connection, source_id: &str, path: &Path) -
                 if let Some(parsed) = parse_access_line(&line) {
                     push_row(&mut insert, parsed, line)?;
                 }
+                nonempty_lines += 1;
             }
             drop(insert);
             save_cursor(&tx, &path_str, line_no, size, true)?;
@@ -140,6 +161,7 @@ pub fn ingest_access_file(conn: &mut Connection, source_id: &str, path: &Path) -
                 }
                 offset += n as i64;
                 line.truncate(line.trim_end().len());
+                if !line.trim().is_empty() { nonempty_lines += 1; }
                 if let Some(parsed) = parse_access_line(&line) {
                     push_row(&mut insert, parsed, line)?;
                 }
@@ -148,7 +170,72 @@ pub fn ingest_access_file(conn: &mut Connection, source_id: &str, path: &Path) -
             save_cursor(&tx, &path_str, offset, size, false)?;
         }
     }
+    if nonempty_lines > 0 && new_rows.is_empty() {
+        return Err(format!("{path_str}: none of {nonempty_lines} log lines matched a supported access log format"));
+    }
     tx.commit().map_err(|e| e.to_string())?;
 
     Ok(new_rows)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn database() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(crate::db::SCHEMA).unwrap();
+        conn
+    }
+
+    #[test]
+    fn recovers_empty_import_without_reimporting_successful_rows() {
+        let path = std::env::temp_dir().join(format!("tomahawk-{}.log", uuid::Uuid::new_v4()));
+        let line = "192.0.2.1 - - [15/Sep/2026:00:00:08 -0400] \"GET / HTTP/1.1\" 200 25 example.com \"-\" \"Browser\" \"-\"\n";
+        std::fs::write(&path, line).unwrap();
+        let mut conn = database();
+        let file_path = path.to_string_lossy();
+        save_cursor(&conn, &file_path, line.len() as i64, line.len() as i64, false).unwrap();
+        assert_eq!(ingest_access_file(&mut conn, "test", &path).unwrap().len(), 1);
+        assert!(ingest_access_file(&mut conn, "test", &path).unwrap().is_empty());
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn unsupported_file_reports_error_without_advancing_cursor() {
+        let path = std::env::temp_dir().join(format!("tomahawk-{}.log", uuid::Uuid::new_v4()));
+        std::fs::write(&path, "unsupported log format\n").unwrap();
+        let mut conn = database();
+        let error = ingest_access_file(&mut conn, "test", &path).unwrap_err();
+        assert!(error.contains("none of 1 log lines"));
+        assert_eq!(load_cursor(&conn, &path.to_string_lossy()).byte_offset, 0);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    // Local diagnostic: keeps the user\'s log out of the repository fixtures.
+    #[test]
+    #[ignore = "requires TOMAHAWK_TEST_LOG pointing to a local access log"]
+    fn imports_local_log() {
+        let path = std::path::PathBuf::from(std::env::var("TOMAHAWK_TEST_LOG").unwrap());
+        let mut conn = database();
+        let started = std::time::Instant::now();
+        let rows = ingest_access_file(&mut conn, "test", &path).unwrap();
+        let input = File::open(&path).unwrap();
+        let reader: Box<dyn Read> = if is_gzip(&path).unwrap() {
+            Box::new(flate2::read::GzDecoder::new(input))
+        } else {
+            Box::new(input)
+        };
+        let lines = BufReader::new(reader).lines().count();
+        println!("Imported {} of {lines} lines in {:?}", rows.len(), started.elapsed());
+        assert_eq!(rows.len(), lines);
+        for row in &rows {
+            assert!(!row.hostname.is_empty());
+            assert_eq!(row.forwarded_for, "-");
+            assert!(!row.timestamp.is_empty());
+            let stored: String = conn.query_row("SELECT hostname FROM access_rows WHERE id = ?1", [row.id.strip_prefix("test:").unwrap()], |r| r.get(0)).unwrap();
+            assert_eq!(stored, row.hostname);
+        }
+        assert!(ingest_access_file(&mut conn, "test", &path).unwrap().is_empty());
+    }
 }

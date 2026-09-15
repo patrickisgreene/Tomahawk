@@ -1,16 +1,27 @@
-import { defineStore } from "pinia";
+import { acceptHMRUpdate, defineStore } from "pinia";
 import {
-  seedTailRows, seedErrors,
+  seedTailRows,
   hostsData, dayBarsData, topPagesData, topAgentsData, alertRules,
   panelCatalog, sftpBrowserFS, statusBarsData,
 } from "../data/mock";
 import { createLogSource, isTauri, loadRecentRows } from "../data/logSource";
 import { listLocalDir, addSource as addSourceApi, removeSource as removeSourceApi, listSources, listQueryFields } from "../data/sourcesApi";
-import { geoipStatus, lookupGeoip } from "../data/geoipApi";
+import { geoipStatus, lookupGeoip, reverseDns, lookupNetworkDetails } from "../data/geoipApi";
+import { joinLocalPath, localPathCrumbs } from "../data/localPath";
 
-const MAX_ROWS = 400;
+
 const MAX_HISTORY = 60;
 const SAVED_QUERIES_KEY = "tomahawk.savedQueries";
+const PANEL_SIZES_KEY = "tomahawk.panelSizes";
+const PANEL_SIZES_DEFAULTS = { left: 272, right: 306, bottom: 244, mix: 322, throughput: 184, talkers: 196 };
+const PANEL_SIZE_LIMITS = {
+  left: { min: 170, max: 640 },
+  right: { min: 220, max: 720 },
+  bottom: { min: 120, max: 520 },
+  mix: { min: 220, max: 720 },
+  throughput: { min: 84, max: 420 },
+  talkers: { min: 84, max: 420 },
+};
 const QUERY_FIELDS = [
   { id: "time", label: "time", type: "text" },
   { id: "ts", label: "ts", type: "number" },
@@ -22,6 +33,13 @@ const QUERY_FIELDS = [
   { id: "ms", label: "ms", type: "number" },
   { id: "referer", label: "referer", type: "text" },
   { id: "userAgent", label: "user_agent", type: "text" },
+  { id: "hostname", label: "hostname", type: "text" },
+  { id: "forwardedFor", label: "forwarded_for", type: "text" },
+  { id: "ident", label: "ident", type: "text" },
+  { id: "authUser", label: "auth_user", type: "text" },
+  { id: "timestamp", label: "timestamp", type: "text" },
+  { id: "request", label: "request", type: "text" },
+  { id: "protocol", label: "protocol", type: "text" },
   { id: "raw", label: "raw", type: "text" },
 ];
 const QUERY_OPERATORS = [
@@ -48,6 +66,27 @@ function loadSavedQueries() {
 function persistSavedQueries(queries) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(SAVED_QUERIES_KEY, JSON.stringify(queries));
+}
+
+function loadPanelSizes() {
+  if (typeof window === "undefined") return { ...PANEL_SIZES_DEFAULTS };
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(PANEL_SIZES_KEY) || "{}");
+    const sizes = { ...PANEL_SIZES_DEFAULTS, ...parsed };
+    for (const key of Object.keys(PANEL_SIZES_DEFAULTS)) {
+      const limits = PANEL_SIZE_LIMITS[key];
+      const value = Number(sizes[key]);
+      sizes[key] = Number.isFinite(value) ? Math.max(limits.min, Math.min(limits.max, value)) : PANEL_SIZES_DEFAULTS[key];
+    }
+    return sizes;
+  } catch {
+    return { ...PANEL_SIZES_DEFAULTS };
+  }
+}
+
+function persistPanelSizes(sizes) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(PANEL_SIZES_KEY, JSON.stringify(sizes));
 }
 
 function defaultQueryCondition() {
@@ -106,9 +145,17 @@ export const useMonitorStore = defineStore("monitor", {
     tailLoading: false,
     selectedRowId: null,
     tailFilterText: "",
+    tailLimit: 400,
+    panelVisibility: { left: true, right: true, bottom: true },
+    panelSizes: loadPanelSizes(),
+    tailSourceId: "",
+    tailDomain: "",
+    tailWindowMs: 0,
+    tailMinStatus: 0,
     tailSortDesc: true, // newest first, matches the design's default caret
     resyncIntervalMs: 30000,
     lastSyncedAt: Date.now(),
+    syncError: null,
     isSyncing: false,
     syncProgress: null, // { completed, total } | null — only set during a real per-source sync
     _source: null,
@@ -126,9 +173,8 @@ export const useMonitorStore = defineStore("monitor", {
     // ---- top talkers ----
     talkerKind: "clients",
 
-    // ---- error log / bottom dock ----
-    errors: seedErrors,
-    queryConditions: [defaultQueryCondition()],
+    // ---- query builder / bottom dock ----
+    queryConditions: [],
     queryName: "",
     queryFieldList: QUERY_FIELDS,
     savedQueries: loadSavedQueries(),
@@ -140,12 +186,20 @@ export const useMonitorStore = defineStore("monitor", {
       loadingIps: [],
     },
 
+    // Per-IP reverse DNS + city/ASN enrichment, resolved on demand when a
+    // row is selected. `byIp` values are one merged object:
+    // { rdns, city, region, lat, lon, asn, org, errors }.
+    enrichment: {
+      byIp: {},
+      loadingIps: [],
+    },
+
     bufferedBase: 12400,
 
     // ---- docks: which panels are open where, and which is focused ----
     dockTabs: {
       stream: ["access", "traffic"],
-      bottom: ["errlog", "query", "alerts"],
+      bottom: ["query", "alerts"],
       inspector: ["inspector", "history"],
       sources: ["sources", "saved"],
       talkers: ["talkers"],
@@ -169,6 +223,7 @@ export const useMonitorStore = defineStore("monitor", {
     showAddSourceDialog: false,
     addSourceTab: "file", // file | directory | sftp
     addSourceRealPath: null, // absolute path currently browsed; null until first loaded
+    addSourceError: null,
     addSourceListing: [],
     addSourceLoading: false,
     addSourceSelected: null,
@@ -210,9 +265,14 @@ export const useMonitorStore = defineStore("monitor", {
     },
     filteredTailRows(state) {
       const q = state.tailFilterText.trim().toLowerCase();
-      const rows = !q
-        ? state.tailRows
-        : state.tailRows.filter((r) => `${r.path} ${r.status} ${r.method}`.toLowerCase().includes(q));
+      const sourceRows = state.tailRows.filter((r) => !state.tailSourceId || r.id.startsWith(`${state.tailSourceId}:`));
+      const latest = sourceRows.reduce((ts, r) => Math.max(ts, r.ts || 0), 0);
+      const rows = sourceRows.filter((r) =>
+        (!state.tailDomain || r.hostname?.toLowerCase() === state.tailDomain) &&
+        (!state.tailWindowMs || r.ts >= latest - state.tailWindowMs) &&
+        r.status >= state.tailMinStatus &&
+        (!q || Object.values(r).some((value) => String(value ?? "").toLowerCase().includes(q)))
+      );
       const queried = rows.filter((r) => state.queryConditions.every((c) => conditionMatches(r, c, state.queryFieldList)));
       return state.tailSortDesc ? queried.slice().reverse() : queried;
     },
@@ -378,8 +438,28 @@ export const useMonitorStore = defineStore("monitor", {
     toggleSort() {
       this.tailSortDesc = !this.tailSortDesc;
     },
+togglePanel(side) {
+      if (!Object.hasOwn(this.panelVisibility, side)) return;
+      this.panelVisibility[side] = !this.panelVisibility[side];
+      this.panelPicker = null;
+    },
+    resizePanel(key, delta) {
+      const limits = PANEL_SIZE_LIMITS[key];
+      if (!limits) return;
+      const current = this.panelSizes[key];
+      if (current == null) return;
+      const next = Math.max(limits.min, Math.min(limits.max, current + delta));
+      if (next === current) return;
+      this.panelSizes[key] = next;
+      persistPanelSizes(this.panelSizes);
+    },
     setTailFilter(text) {
       this.tailFilterText = text;
+    },
+    async setTailLimit(limit) {
+      if (![400, 1000, 5000].includes(limit)) return;
+      this.tailLimit = limit;
+      await this.hydrateTailRows();
     },
     _ensureSource() {
       if (!this._source) this._source = createLogSource();
@@ -392,15 +472,18 @@ export const useMonitorStore = defineStore("monitor", {
     // before the resync loop takes over incrementally.
     async hydrateTailRows() {
       this.tailLoading = true;
+      this.syncError = null;
       try {
-        this.tailRows = await loadRecentRows(MAX_ROWS);
+        this.tailRows = await loadRecentRows(this.tailLimit);
+      } catch (error) {
+        this.syncError = `Could not load log rows: ${String(error)}`;
       } finally {
         this.tailLoading = false;
       }
     },
     async refreshSourceData() {
       await this.loadSources();
-      this.tailRows = await loadRecentRows(MAX_ROWS);
+      this.tailRows = await loadRecentRows(this.tailLimit);
       if (this.selectedRowId && !this.tailRows.some((r) => r.id === this.selectedRowId)) {
         this.selectedRowId = null;
       }
@@ -410,7 +493,9 @@ export const useMonitorStore = defineStore("monitor", {
     // source — that's what makes real per-source sync progress
     // possible instead of just an opaque "please wait".
     async _pull() {
+      if (this.isSyncing) return;
       this.isSyncing = true;
+      this.syncError = null;
       try {
         const source = this._ensureSource();
         await this.loadSources(); // fresh source list before deciding how to sync
@@ -427,9 +512,12 @@ export const useMonitorStore = defineStore("monitor", {
           }
           await this.loadSources(); // refresh row counts now that ingestion finished
         }
-        if (this.tailRows.length > MAX_ROWS) this.tailRows.splice(0, this.tailRows.length - MAX_ROWS);
+        if (this.tailRows.length > this.tailLimit) this.tailRows.splice(0, this.tailRows.length - this.tailLimit);
         this.lastSyncedAt = Date.now();
         this.statusBars = statusBarsData();
+      } catch (error) {
+        this.syncError = String(error);
+        throw error;
       } finally {
         this.isSyncing = false;
         this.syncProgress = null;
@@ -510,7 +598,6 @@ export const useMonitorStore = defineStore("monitor", {
     },
     removeQueryCondition(id) {
       this.queryConditions = this.queryConditions.filter((c) => c.id !== id);
-      if (!this.queryConditions.length) this.addQueryCondition();
     },
     updateQueryCondition(id, patch) {
       const condition = this.queryConditions.find((c) => c.id === id);
@@ -538,7 +625,7 @@ export const useMonitorStore = defineStore("monitor", {
     newQuery() {
       this.activeSavedQueryId = null;
       this.queryName = "";
-      this.queryConditions = [defaultQueryCondition()];
+      this.queryConditions = [];
     },
     saveCurrentQuery() {
       const name = this.queryName.trim();
@@ -586,6 +673,33 @@ export const useMonitorStore = defineStore("monitor", {
         this.geoip.loadingIps = this.geoip.loadingIps.filter((x) => x !== ip);
       }
     },
+    // Resolves reverse DNS (system resolver) and city/ASN details for one
+    // IP, cached per address. Either lookup can fail independently — a
+    // missing PTR record or an offline GeoIP provider shouldn't drop the
+    // other result.
+    async lookupEnrichmentForIp(ip) {
+      if (!ip || typeof ip !== "string") return;
+      if (this.enrichment.byIp[ip] || this.enrichment.loadingIps.includes(ip)) return;
+      this.enrichment.loadingIps.push(ip);
+      try {
+        const [rdns, net] = await Promise.all([
+          reverseDns(ip).catch(() => null),
+          lookupNetworkDetails(ip).catch(() => null),
+        ]);
+        this.enrichment.byIp[ip] = {
+          rdns: rdns || null,
+          city: net?.city ?? null,
+          region: net?.region ?? null,
+          lat: net?.latitude ?? null,
+          lon: net?.longitude ?? null,
+          asn: net?.asn ?? null,
+          org: net?.organization ?? null,
+          errors: Array.isArray(net?.errors) ? net.errors : [],
+        };
+      } finally {
+        this.enrichment.loadingIps = this.enrichment.loadingIps.filter((x) => x !== ip);
+      }
+    },
 
     // ---- add source dialog ----
     async openAddSourceDialog() {
@@ -603,21 +717,24 @@ export const useMonitorStore = defineStore("monitor", {
     // browser. `path` null means "start from the home directory".
     async browseAddSourceDir(path) {
       this.addSourceLoading = true;
+      this.addSourceError = null;
       try {
         const listing = await listLocalDir(path);
         this.addSourceRealPath = listing.path;
         this.addSourceListing = listing.entries;
         this.addSourceSelected = null;
+      } catch (error) {
+        this.addSourceError = String(error);
       } finally {
         this.addSourceLoading = false;
       }
     },
     openAddSourceFolder(name) {
-      this.browseAddSourceDir(`${this.addSourceRealPath}/${name}`);
+      return this.browseAddSourceDir(joinLocalPath(this.addSourceRealPath, name));
     },
     goToAddSourceCrumb(index) {
-      const parts = (this.addSourceRealPath || "").split("/").filter(Boolean);
-      this.browseAddSourceDir("/" + parts.slice(0, index + 1).join("/"));
+      const crumb = localPathCrumbs(this.addSourceRealPath)[index];
+      if (crumb) return this.browseAddSourceDir(crumb.path);
     },
     setAddSourcePattern(pattern) {
       this.addSourcePattern = pattern;
@@ -665,8 +782,8 @@ export const useMonitorStore = defineStore("monitor", {
         return;
       }
       const kind = this.addSourceTab; // "file" | "directory"
-      const path = kind === "file" ? `${this.addSourceRealPath}/${this.addSourceSelected}` : this.addSourceRealPath;
-      const label = kind === "file" ? this.addSourceSelected : path.split("/").filter(Boolean).pop() || path;
+      const path = kind === "file" ? joinLocalPath(this.addSourceRealPath, this.addSourceSelected) : this.addSourceRealPath;
+      const label = kind === "file" ? this.addSourceSelected : localPathCrumbs(path).at(-1)?.label || path;
       await addSourceApi({
         kind,
         label,
@@ -767,3 +884,9 @@ export const useMonitorStore = defineStore("monitor", {
     },
   },
 });
+
+// Keep existing data while updating actions, getters, and new state fields
+// when Vite replaces this module in the running desktop app.
+if (import.meta.hot) {
+  import.meta.hot.accept(acceptHMRUpdate(useMonitorStore, import.meta.hot));
+}

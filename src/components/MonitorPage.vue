@@ -1,23 +1,45 @@
 <script setup>
 import Dock from "./Dock.vue";
+import Splitter from "./Splitter.vue";
+import { computed } from "vue";
+import { useMonitorStore } from "../store/monitor";
+const store = useMonitorStore();
+const columns = computed(() => [
+  ...(store.panelVisibility.left ? [`${store.panelSizes.left}px`, "5px"] : []),
+  "minmax(0, 1fr)",
+  ...(store.panelVisibility.right ? ["5px", `${store.panelSizes.right}px`] : []),
+].join(" "));
 </script>
 
 <template>
-  <div class="main">
-    <div class="col-left">
+  <div class="main" :style="{ gridTemplateColumns: columns }">
+    <div
+      id="monitor-left"
+      v-show="store.panelVisibility.left"
+      class="col-left"
+      :style="{ gridTemplateRows: `minmax(0, 1fr) 5px ${store.panelSizes.throughput}px 5px ${store.panelSizes.talkers}px` }"
+    >
       <Dock dock-id="sources" />
-      <div class="splitter horiz">···</div>
+      <Splitter axis="height" target="throughput" invert />
       <Dock dock-id="throughput" />
-      <div class="splitter horiz">···</div>
+      <Splitter axis="height" target="talkers" invert />
       <Dock dock-id="talkers" />
     </div>
-    <div class="splitter vert">···</div>
-    <div class="col-mid">
+    <Splitter v-show="store.panelVisibility.left" axis="width" target="left" />
+    <div
+      class="col-mid"
+      :style="{ gridTemplateRows: store.panelVisibility.bottom ? `minmax(0, 1fr) 5px ${store.panelSizes.bottom}px` : 'minmax(0, 1fr)' }"
+    >
       <Dock dock-id="stream" />
-      <div class="splitter horiz">···</div>
-      <div class="col-mid-bottom">
+      <Splitter v-show="store.panelVisibility.bottom" axis="height" target="bottom" invert />
+      <div
+        id="monitor-bottom"
+        v-show="store.panelVisibility.bottom"
+        class="col-mid-bottom"
+        :style="{ gridTemplateColumns: `minmax(0, 1fr) 5px ${store.panelSizes.mix}px` }"
+      >
         <Dock dock-id="bottom" />
-        <div class="splitter vert">···</div>
+        <Splitter axis="width" target="mix" invert />
         <Dock dock-id="mix">
           <template #trailing>
             <div style="margin-left:auto;display:flex;gap:6px;color:var(--color-neutral-600);font-size:11px">
@@ -27,7 +49,7 @@ import Dock from "./Dock.vue";
         </Dock>
       </div>
     </div>
-    <div class="splitter vert">···</div>
-    <Dock dock-id="inspector" />
+    <Splitter v-show="store.panelVisibility.right" axis="width" target="right" invert />
+    <Dock id="monitor-right" v-show="store.panelVisibility.right" dock-id="inspector" />
   </div>
 </template>

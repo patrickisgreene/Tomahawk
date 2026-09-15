@@ -83,6 +83,17 @@ pub fn lookup_geoip(ip: String) -> Result<GeoipLookup, String> {
 }
 
 #[tauri::command]
+pub async fn reverse_dns(ip: String) -> Result<String, String> {
+    crate::enrichment::reverse_dns(ip).await
+}
+
+#[tauri::command]
+pub async fn lookup_network_details(ip: String) -> Result<crate::enrichment::NetworkDetails, String> {
+    tauri::async_runtime::spawn_blocking(move || crate::enrichment::network_details(ip))
+        .await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 pub fn list_query_fields() -> Result<Vec<QueryFieldSummary>, String> {
     let config = load_config()?;
     let Some(source) = config.sources.first() else {
@@ -106,6 +117,8 @@ pub fn list_query_fields() -> Result<Vec<QueryFieldSummary>, String> {
         }
         let id = match name.as_str() {
             "file_path" => "filePath".to_string(),
+            "forwarded_for" => "forwardedFor".to_string(),
+            "auth_user" => "authUser".to_string(),
             "user_agent" => "userAgent".to_string(),
             _ => name.clone(),
         };
@@ -143,7 +156,7 @@ pub fn load_recent_rows(source_ids: Option<Vec<String>>, limit: i64) -> Result<V
         let conn = db::open_source_db(&source.id)?;
         let mut stmt = conn
             .prepare(
-                "SELECT id, file_path, ts, ip, method, status, path, bytes, ms, referer, user_agent, raw
+                "SELECT id, file_path, ts, ip, method, status, path, bytes, ms, referer, user_agent, raw, hostname, forwarded_for, ident, auth_user, timestamp, request, protocol
                  FROM access_rows ORDER BY ts DESC LIMIT ?1",
             )
             .map_err(|e| e.to_string())?;
@@ -153,6 +166,14 @@ pub fn load_recent_rows(source_ids: Option<Vec<String>>, limit: i64) -> Result<V
                 let file_path: String = row.get(1)?;
                 let ts: i64 = row.get(2)?;
                 Ok(AccessLogRow {
+                    hostname: row.get::<_, Option<String>>(12)?.unwrap_or_default(),
+                    forwarded_for: row.get::<_, Option<String>>(13)?.unwrap_or_default(),
+                    ident: row.get::<_, Option<String>>(14)?.unwrap_or_default(),
+                    auth_user: row.get::<_, Option<String>>(15)?.unwrap_or_default(),
+                    timestamp: row.get::<_, Option<String>>(16)?.unwrap_or_default(),
+                    request: row.get::<_, Option<String>>(17)?.unwrap_or_default(),
+                    protocol: row.get::<_, Option<String>>(18)?.unwrap_or_default(),
+
                     id: format!("{}:{id}", source.id),
                     file_path,
                     ts,
@@ -201,6 +222,14 @@ fn default_query_fields() -> Vec<QueryFieldSummary> {
         ("referer", "referer", "text"),
         ("userAgent", "user_agent", "text"),
         ("raw", "raw", "text"),
+        ("hostname", "hostname", "text"),
+        ("forwardedFor", "forwarded_for", "text"),
+        ("ident", "ident", "text"),
+        ("authUser", "auth_user", "text"),
+        ("timestamp", "timestamp", "text"),
+        ("request", "request", "text"),
+        ("protocol", "protocol", "text"),
+
     ]
     .into_iter()
     .map(|(id, label, field_type)| QueryFieldSummary {

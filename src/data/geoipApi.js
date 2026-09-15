@@ -15,3 +15,16 @@ export async function lookupGeoip(ip) {
   if (!isTauri()) return null;
   return await invoke("lookup_geoip", { ip });
 }
+
+// Reverse DNS via the system resolver (dns-lookup on the Rust side).
+export async function reverseDns(ip) {
+  if (!isTauri()) return null;
+  return await invoke("reverse_dns", { ip });
+}
+
+// City-level location + ASN data from the DB-IP free City/ASN databases.
+export async function lookupNetworkDetails(ip) {
+  if (!isTauri())
+    return { city: null, region: null, latitude: null, longitude: null, asn: null, organization: null, errors: [] };
+  return await invoke("lookup_network_details", { ip });
+}

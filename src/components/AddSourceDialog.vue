@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from "vue";
 import { useMonitorStore } from "../store/monitor";
+import { joinLocalPath, localPathCrumbs } from "../data/localPath";
 
 const store = useMonitorStore();
 const TABS = [
@@ -9,7 +10,7 @@ const TABS = [
   { id: "sftp", icon: "ph-cloud-arrow-down", label: "SFTP" },
 ];
 
-const crumbs = computed(() => (store.addSourceRealPath || "").split("/").filter(Boolean));
+const crumbs = computed(() => localPathCrumbs(store.addSourceRealPath));
 const canConfirm = computed(() => {
   if (store.addSourceTab === "file") return !!store.addSourceSelected;
   if (store.addSourceTab === "directory") return !!store.addSourceRealPath;
@@ -48,7 +49,7 @@ function iconFor(kind) {
                 class="crumb"
                 :class="{ current: i === crumbs.length - 1 }"
                 @click="store.goToAddSourceCrumb(i)"
-              >{{ part }}</span>
+              >{{ part.label }}</span>
               <span v-if="i < crumbs.length - 1" class="crumb-sep">›</span>
             </template>
             <label class="toggle-row compact" style="margin-left:auto" @click="store.setAddSourceHideHidden(!store.addSourceHideHidden)">
@@ -88,7 +89,7 @@ function iconFor(kind) {
         </div>
         <div class="file-preview">
           <i class="ph ph-file-text" style="color:var(--color-accent-300)"></i>
-          <span v-if="store.addSourceSelected">{{ store.addSourceRealPath }}/{{ store.addSourceSelected }}</span>
+          <span v-if="store.addSourceSelected">{{ joinLocalPath(store.addSourceRealPath, store.addSourceSelected) }}</span>
           <span v-else style="color:var(--color-neutral-500)">No file selected</span>
         </div>
       </div>
@@ -99,7 +100,7 @@ function iconFor(kind) {
           <div class="file-browser-crumbs">
             <i class="ph ph-house-simple"></i>
             <template v-for="(part, i) in crumbs" :key="i">
-              <span class="crumb" :class="{ current: i === crumbs.length - 1 }" @click="store.goToAddSourceCrumb(i)">{{ part }}</span>
+              <span class="crumb" :class="{ current: i === crumbs.length - 1 }" @click="store.goToAddSourceCrumb(i)">{{ part.label }}</span>
               <span v-if="i < crumbs.length - 1" class="crumb-sep">›</span>
             </template>
             <label class="toggle-row compact" style="margin-left:auto" @click="store.setAddSourceHideHidden(!store.addSourceHideHidden)">
@@ -189,6 +190,7 @@ function iconFor(kind) {
       </div>
 
       <div class="modal-footer">
+        <span v-if="store.addSourceError && store.addSourceTab !== 'sftp'" role="alert" style="margin-right:auto;overflow-wrap:anywhere">{{ store.addSourceError }}</span>
         <button class="btn-plain" @click="store.closeAddSourceDialog()">Cancel</button>
         <button class="chip outline" :style="canConfirm ? {} : { opacity: 0.5, cursor: 'default' }" :disabled="!canConfirm" @click="store.confirmAddSource()"><i class="ph ph-plus"></i>Add source</button>
       </div>

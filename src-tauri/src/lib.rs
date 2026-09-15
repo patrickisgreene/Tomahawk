@@ -3,6 +3,7 @@ mod config;
 mod db;
 mod fsbrowse;
 mod geoip;
+mod enrichment;
 mod ingest;
 mod parse;
 mod types;
@@ -20,6 +21,8 @@ pub fn run() {
             commands::geoip_status,
             commands::download_geoip_database,
             commands::lookup_geoip,
+            commands::reverse_dns,
+            commands::lookup_network_details,
             commands::pull_new_rows,
             commands::load_recent_rows,
         ])

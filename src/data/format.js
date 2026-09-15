@@ -25,6 +25,14 @@ function pad2(n) {
   return String(n).padStart(2, "0");
 }
 
+// Use the absolute timestamp and the computer\'s timezone (including DST).
+export function formatLocalTimestamp(ts) {
+  if (ts == null || !Number.isFinite(ts)) return "-";
+  const date = new Date(ts);
+  if (!Number.isFinite(date.getTime())) return "-";
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())} ${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`;
+}
+
 export function nowClock(withMs) {
   const d = new Date();
   const base = `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;

@@ -1,5 +1,6 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from "vue";
+import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, PanelBottomClose, PanelBottomOpen } from "@lucide/vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useMonitorStore } from "../store/monitor";
 import { useRelativeTime } from "../composables/useRelativeTime";
@@ -34,12 +35,14 @@ function closeWindow() {
   appWindow.close();
 }
 
+const PANEL_TOGGLES = [
+  { side: "left", close: PanelLeftClose, open: PanelLeftOpen },
+  { side: "right", close: PanelRightClose, open: PanelRightOpen },
+  { side: "bottom", close: PanelBottomClose, open: PanelBottomOpen },
+];
+
 const NAV = [
   { id: "monitor", label: "Monitor" },
-  { id: "explore", label: "Explore" },
-  { id: "reports", label: "Reports" },
-  { id: "alerts", label: "Alerts" },
-  { id: "hosts", label: "Hosts" },
 ];
 </script>
 
@@ -50,9 +53,14 @@ const NAV = [
         <button class="icon-btn" title="Menu" @click="store.toggleFileMenu()"><i class="ph ph-list"></i></button>
         <FileMenuDropdown v-if="store.showFileMenu" />
       </div>
-      <button class="icon-btn" title="Undo"><i class="ph ph-arrow-counter-clockwise"></i></button>
-      <button class="icon-btn" title="Redo"><i class="ph ph-arrow-clockwise"></i></button>
-      <button class="icon-btn" title="Bookmarks"><i class="ph ph-bookmark-simple"></i></button>
+      <button v-for="panel in PANEL_TOGGLES" :key="panel.side" class="icon-btn panel-toggle"
+        :class="{ 'is-visible': store.panelVisibility[panel.side] }"
+        :title="`${store.panelVisibility[panel.side] ? 'Hide' : 'Show'} ${panel.side} panels`"
+        :aria-label="`${store.panelVisibility[panel.side] ? 'Hide' : 'Show'} ${panel.side} panels`"
+        :aria-expanded="store.panelVisibility[panel.side]" :aria-controls="`monitor-${panel.side}`"
+        @click="store.togglePanel(panel.side)">
+        <component :is="store.panelVisibility[panel.side] ? panel.close : panel.open" :size="15" :stroke-width="1.7" aria-hidden="true" />
+      </button>
       <button class="icon-btn" title="Settings" @click="store.openSettingsDialog()"><i class="ph ph-gear-six"></i></button>
     </div>
     <button class="tail-state" @click="store.resyncNow()" title="Pull the latest lines now">

@@ -3,7 +3,7 @@ use std::path::Path;
 
 use crate::config::source_db_path;
 
-const SCHEMA: &str = "
+pub(crate) const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS access_rows (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   file_path TEXT NOT NULL,
@@ -16,20 +16,17 @@ CREATE TABLE IF NOT EXISTS access_rows (
   ms REAL,
   referer TEXT,
   user_agent TEXT,
-  raw TEXT
+  raw TEXT,
+  hostname TEXT,
+  forwarded_for TEXT,
+  ident TEXT,
+  auth_user TEXT,
+  timestamp TEXT,
+  request TEXT,
+  protocol TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_access_ts ON access_rows(ts);
 CREATE INDEX IF NOT EXISTS idx_access_status ON access_rows(status);
-
-CREATE TABLE IF NOT EXISTS error_rows (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  file_path TEXT NOT NULL,
-  ts INTEGER NOT NULL,
-  level TEXT NOT NULL,
-  module TEXT,
-  pid INTEGER,
-  message TEXT NOT NULL
-);
 
 CREATE TABLE IF NOT EXISTS cursors (
   file_path TEXT PRIMARY KEY,
@@ -63,6 +60,29 @@ fn migrate(conn: &Connection) -> Result<(), String> {
         conn.execute("ALTER TABLE access_rows ADD COLUMN raw TEXT", [])
             .map_err(|e| e.to_string())?;
     }
+    let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).map_err(|e| e.to_string())?;
+    if version < 1 {
+        let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+        for field in ["hostname", "forwarded_for", "ident", "auth_user", "timestamp", "request", "protocol"] {
+            if tx.prepare(&format!("SELECT {field} FROM access_rows LIMIT 0")).is_err() {
+                tx.execute(&format!("ALTER TABLE access_rows ADD COLUMN {field} TEXT"), []).map_err(|e| e.to_string())?;
+            }
+        }
+        {
+            let mut select = tx.prepare("SELECT id, raw FROM access_rows WHERE raw IS NOT NULL").map_err(|e| e.to_string())?;
+            let mut rows = select.query([]).map_err(|e| e.to_string())?;
+            let mut update = tx.prepare("UPDATE access_rows SET hostname = ?1, forwarded_for = ?2, ident = ?3, auth_user = ?4, timestamp = ?5, request = ?6, protocol = ?7 WHERE id = ?8").map_err(|e| e.to_string())?;
+            while let Some(row) = rows.next().map_err(|e| e.to_string())? {
+                let id: i64 = row.get(0).map_err(|e| e.to_string())?;
+                let raw: String = row.get(1).map_err(|e| e.to_string())?;
+                if let Some(parsed) = crate::parse::parse_access_line(&raw) {
+                    update.execute(rusqlite::params![parsed.hostname, parsed.forwarded_for, parsed.ident, parsed.auth_user, parsed.timestamp, parsed.request, parsed.protocol, id]).map_err(|e| e.to_string())?;
+                }
+            }
+        }
+        tx.pragma_update(None, "user_version", 1).map_err(|e| e.to_string())?;
+        tx.commit().map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
 
@@ -79,4 +99,23 @@ pub fn delete_source_db(source_id: &str) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn migration_backfills_all_fields_and_preserves_rows_and_cursors() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE access_rows (id INTEGER PRIMARY KEY, raw TEXT); CREATE TABLE cursors (byte_offset INTEGER); INSERT INTO cursors VALUES (1234);").unwrap();
+        let raw = r#"192.0.2.1 ident alice [15/Sep/2026:00:00:08 -0400] "GET /test?q=1 HTTP/1.1" 200 25 example.com "-" "Browser" "198.51.100.1, 192.0.2.2""#;
+        conn.execute("INSERT INTO access_rows VALUES (42, ?1)", [raw]).unwrap();
+        migrate(&conn).unwrap();
+        migrate(&conn).unwrap();
+        let values: Vec<String> = conn.query_row("SELECT hostname, forwarded_for, ident, auth_user, timestamp, request, protocol FROM access_rows WHERE id = 42", [], |row| (0..7).map(|i| row.get(i)).collect()).unwrap();
+        assert_eq!(values, ["example.com", "198.51.100.1, 192.0.2.2", "ident", "alice", "15/Sep/2026:00:00:08 -0400", "GET /test?q=1 HTTP/1.1", "HTTP/1.1"]);
+        assert_eq!(conn.query_row("SELECT COUNT(*) FROM access_rows", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
+        assert_eq!(conn.query_row("SELECT byte_offset FROM cursors", [], |r| r.get::<_, i64>(0)).unwrap(), 1234);
+    }
 }

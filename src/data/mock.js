@@ -35,17 +35,6 @@ export function seedTailRows() {
   ];
 }
 
-export const seedErrors = [
-  { t: "13:41:01", lvl: "error", mod: "proxy_fcgi", msg: "AH01067: Failed to read FastCGI header", meta: "pid 21884 · web-01", count: "×9" },
-  { t: "13:41:02", lvl: "error", mod: "proxy", msg: "AH00957: FCGI: attempt to connect to unix:/run/php-fpm.sock failed", meta: "pid 21884 · web-01", count: "×4" },
-  { t: "13:41:12", lvl: "warn", mod: "mpm_event", msg: "AH00484: server reached MaxRequestWorkers", meta: "web-01", count: "×2" },
-  { t: "13:41:35", lvl: "error", mod: "proxy_fcgi", msg: "AH01070: Error parsing script headers", meta: "pid 21901 · web-02", count: "×3" },
-  { t: "13:42:07", lvl: "error", mod: "proxy_fcgi", msg: "AH01067: Failed to read FastCGI header", meta: "pid 21884 · web-01", count: "×9" },
-  { t: "13:42:09", lvl: "warn", mod: "core", msg: "AH00558: could not reliably determine server name", meta: "web-03", count: "×1" },
-  { t: "13:42:18", lvl: "error", mod: "core", msg: "AH00124: Request exceeded the limit of 10 internal redirects", meta: "web-02", count: "×1" },
-  { t: "13:42:24", lvl: "notice", mod: "core", msg: "AH00094: command line: /usr/sbin/httpd -D FOREGROUND", meta: "web-03", count: "×1" },
-];
-
 export const talkersData = {
   clients: [
     { label: "203.0.113.47", n: "6.1k", w: "100%" }, { label: "198.51.100.23", n: "4.4k", w: "72%" },
@@ -204,7 +193,6 @@ export const alertRules = [
 export const panelCatalog = [
   { group: "Streams", items: [
     { id: "access", icon: "ph-table", name: "Access log", desc: "Sortable, paused view of parsed request rows — resync to pull latest" },
-    { id: "errlog", icon: "ph-warning-circle", name: "Error log", desc: "httpd error_log entries, by severity" },
   ] },
   { group: "Analysis", items: [
     { id: "query", icon: "ph-funnel", name: "Query builder", desc: "Visual field/operator conditions over any source" },

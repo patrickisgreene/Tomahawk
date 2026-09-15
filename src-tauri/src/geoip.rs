@@ -121,7 +121,7 @@ fn modified_ms(time: SystemTime) -> Option<i64> {
     Some(duration.as_millis() as i64)
 }
 
-fn is_local_ip(ip: IpAddr) -> bool {
+pub(crate) fn is_local_ip(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(ip) => {
             ip.is_private()

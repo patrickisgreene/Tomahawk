@@ -7,6 +7,14 @@ use serde::Serialize;
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccessLogRow {
+    pub hostname: String,
+    pub forwarded_for: String,
+    pub ident: String,
+    pub auth_user: String,
+    pub timestamp: String,
+    pub request: String,
+    pub protocol: String,
+
     pub id: String,
     pub file_path: String,
     pub ts: i64,

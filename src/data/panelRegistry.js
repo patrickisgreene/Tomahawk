@@ -1,6 +1,5 @@
 import AccessLogPanel from "../components/AccessLogPanel.vue";
 import TrafficPanel from "../components/TrafficPanel.vue";
-import ErrorLogPanel from "../components/ErrorLogPanel.vue";
 import QueryPanel from "../components/QueryPanel.vue";
 import AlertsPanel from "../components/AlertsPanel.vue";
 import EntryInspectorPanel from "../components/EntryInspectorPanel.vue";
@@ -16,7 +15,6 @@ import SavedFiltersPanel from "../components/SavedFiltersPanel.vue";
 export const PANEL_REGISTRY = {
   access: { icon: "ph-table", label: "Access log", component: AccessLogPanel },
   traffic: { icon: "ph-chart-line", label: "Traffic", component: TrafficPanel },
-  errlog: { icon: "ph-warning-circle", label: "Error log", component: ErrorLogPanel, badge: (s) => s.errors.length },
   query: { icon: "ph-funnel", label: "Query", component: QueryPanel },
   alerts: { icon: "ph-bell-ringing", label: "Alerts", component: AlertsPanel },
   inspector: { icon: "ph-magnifying-glass-plus", label: "Inspector", component: EntryInspectorPanel },
