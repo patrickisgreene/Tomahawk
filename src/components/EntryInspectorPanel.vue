@@ -1,5 +1,5 @@
 <script setup>
-import { reactive, computed } from "vue";
+import { reactive, computed, watch } from "vue";
 import { useMonitorStore } from "../store/monitor";
 import { statusColor, fmtMs, STATUS_TEXT } from "../data/format";
 import { clientInfo, synthRawLine, timingSplits } from "../data/mock";
@@ -12,15 +12,19 @@ function toggle(id) {
 
 const r = computed(() => store.selectedRow);
 const info = computed(() => (r.value ? clientInfo(r.value.ip) : null));
+const geoip = computed(() => (r.value ? store.geoip.byIp[r.value.ip] : null));
+const geoipLoading = computed(() => !!r.value && store.geoip.loadingIps.includes(r.value.ip));
 const isDanger = computed(() => !!r.value && r.value.status >= 500);
 const pathParts = computed(() => (r.value ? r.value.path.split("?") : ["", null]));
 const splits = computed(() => (r.value ? timingSplits(r.value) : [0, 0, 0, 0]));
 
-// Split the synthesized raw log line into plain/highlighted segments so the
-// status code can be colored without resorting to v-html.
+// Split the raw log line into plain/highlighted segments so the status
+// code can be colored without resorting to v-html. Real rows carry their
+// actual original line (`raw`); mock rows never had one, so they fall
+// back to a synthesized approximation.
 const rawLineParts = computed(() => {
   if (!r.value) return [];
-  const line = synthRawLine(r.value);
+  const line = r.value.raw || synthRawLine(r.value);
   const status = String(r.value.status);
   const re = new RegExp(`(\\s)(${status})(\\s)`);
   const m = line.match(re);
@@ -37,6 +41,14 @@ function filterByEntry() {
   if (!r.value) return;
   store.setTailFilter(`status==${r.value.status} and path=="${pathParts.value[0]}"`);
 }
+
+watch(
+  () => r.value?.ip,
+  (ip) => {
+    if (ip) store.lookupGeoipForIp(ip);
+  },
+  { immediate: true }
+);
 </script>
 
 <template>
@@ -73,10 +85,21 @@ function filterByEntry() {
       <template v-if="!collapsed.client">
         <div class="insp-field"><span class="k">Remote IP</span><div class="v">{{ r.ip }}<i class="ph ph-copy" style="margin-left:auto;color:var(--color-neutral-600)"></i></div></div>
         <div class="insp-field"><span class="k">Reverse DNS</span><div class="v" style="color:var(--color-neutral-400)">{{ info.rdns }}</div></div>
+        <div class="insp-field">
+          <span class="k">Country</span>
+          <div class="v" style="color:var(--color-neutral-300)">
+            <span v-if="geoip?.status === 'ok'">{{ geoip.countryName || geoip.countryCode }} <span style="color:var(--color-neutral-600)">({{ geoip.countryCode }})</span></span>
+            <span v-else-if="geoip?.status === 'local'">local/private</span>
+            <span v-else-if="geoip?.status === 'error'" style="color:var(--st4)">{{ geoip.countryName }}</span>
+            <span v-else-if="geoipLoading">downloading GeoIP...</span>
+            <span v-else style="color:var(--color-neutral-600)">not found</span>
+          </div>
+        </div>
         <div class="insp-field"><span class="k">Geo / ASN</span><div class="v" style="color:var(--color-neutral-300)">{{ info.geo }}</div></div>
+        <div class="insp-field"><span class="k">Geo data</span><div class="v" style="color:var(--color-neutral-600)">{{ geoip?.attribution || "IP Geolocation by DB-IP" }}</div></div>
         <div class="insp-field" style="align-items:start">
           <span class="k" style="padding-top:3px">User agent</span>
-          <div class="v" style="white-space:normal;height:auto;padding:3px 6px;align-items:flex-start;color:var(--color-neutral-400)">{{ info.ua }}</div>
+          <div class="v" style="white-space:normal;height:auto;padding:3px 6px;align-items:flex-start;color:var(--color-neutral-400)">{{ r.userAgent || info.ua }}</div>
         </div>
         <div class="insp-field">
           <span class="k">Classified</span>
@@ -108,13 +131,14 @@ function filterByEntry() {
         </div>
         <div class="insp-field">
           <span class="k">Timing µs</span>
-          <div class="timing-triple">
+          <div v-if="r.ms != null" class="timing-triple">
             <div class="timing-chip"><span class="k">T</span><span :style="{ color: statusColor(r.status) }">{{ fmtMs(r.ms) }}</span></div>
             <div class="timing-chip"><span class="k">U</span><span style="color:var(--color-neutral-300)">{{ fmtMs(r.ms * 0.97) }}</span></div>
             <div class="timing-chip"><span class="k">B</span><span style="color:var(--color-neutral-300)">{{ Math.round(r.ms * 0.03) }}ms</span></div>
           </div>
+          <div v-else class="v" style="color:var(--color-neutral-600)">Not available — this log format doesn't record response time</div>
         </div>
-        <div class="timing-bar-wrap">
+        <div v-if="r.ms != null" class="timing-bar-wrap">
           <div class="timing-bar">
             <div :style="{ width: splits[0] + '%', background: 'var(--color-accent-600)' }"></div>
             <div :style="{ width: splits[1] + '%', background: 'var(--color-accent-400)' }"></div>

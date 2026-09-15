@@ -1,4 +1,5 @@
 <script setup>
+import { computed } from "vue";
 import { useMonitorStore } from "../store/monitor";
 
 const store = useMonitorStore();
@@ -7,6 +8,13 @@ const TABS = [
   { id: "directory", icon: "ph-folder", label: "Directory" },
   { id: "sftp", icon: "ph-cloud-arrow-down", label: "SFTP" },
 ];
+
+const crumbs = computed(() => (store.addSourceRealPath || "").split("/").filter(Boolean));
+const canConfirm = computed(() => {
+  if (store.addSourceTab === "file") return !!store.addSourceSelected;
+  if (store.addSourceTab === "directory") return !!store.addSourceRealPath;
+  return true; // sftp tab: not wired up yet, confirming just closes the dialog
+});
 
 function iconFor(kind) {
   return kind === "dir" ? "ph-folder" : kind === "archive" ? "ph-archive" : "ph-file-text";
@@ -35,35 +43,53 @@ function iconFor(kind) {
         <div class="file-browser">
           <div class="file-browser-crumbs">
             <i class="ph ph-house-simple"></i>
-            <template v-for="(part, i) in store.addSourcePath" :key="i">
+            <template v-for="(part, i) in crumbs" :key="i">
               <span
                 class="crumb"
-                :class="{ current: i === store.addSourcePath.length - 1 }"
+                :class="{ current: i === crumbs.length - 1 }"
                 @click="store.goToAddSourceCrumb(i)"
               >{{ part }}</span>
-              <span v-if="i < store.addSourcePath.length - 1" class="crumb-sep">›</span>
+              <span v-if="i < crumbs.length - 1" class="crumb-sep">›</span>
             </template>
-            <div class="filterbar" style="margin-left:auto;max-width:120px"><i class="ph ph-magnifying-glass"></i><input placeholder="Filter…"></div>
+            <label class="toggle-row compact" style="margin-left:auto" @click="store.setAddSourceHideHidden(!store.addSourceHideHidden)">
+              <span>Hide dot files</span>
+              <span class="toggle" :class="{ on: store.addSourceHideHidden }"><span class="knob"></span></span>
+            </label>
+            <div class="filterbar" style="max-width:120px">
+              <i class="ph ph-magnifying-glass"></i>
+              <input
+                :value="store.addSourceFilterText"
+                @input="store.setAddSourceFilterText($event.target.value)"
+                placeholder="Filter…"
+              >
+            </div>
           </div>
           <div class="file-browser-head"><span>Name</span><span>Modified</span><span style="text-align:right">Size</span></div>
           <div class="file-browser-list">
-            <div
-              v-for="f in store.addSourceListing"
-              :key="f.name"
-              class="file-row"
-              :class="{ selected: f.name === store.addSourceSelected }"
-              @click="f.kind === 'dir' ? store.openAddSourceFolder(f.name) : store.selectAddSourceFile(f.name)"
-            >
-              <span class="file-name"><i class="ph" :class="iconFor(f.kind)"></i>{{ f.name }}</span>
-              <span class="file-meta">{{ f.modified || "—" }}</span>
-              <span class="file-meta" style="text-align:right">{{ f.size || "" }}</span>
-            </div>
+            <template v-if="store.addSourceLoading">
+              <div v-for="i in 5" :key="i" class="file-row skel">
+                <span class="skel-bar" style="width:65%"></span><span class="skel-bar" style="width:50%"></span><span class="skel-bar" style="width:40%"></span>
+              </div>
+            </template>
+            <template v-else>
+              <div
+                v-for="f in store.filteredAddSourceListing"
+                :key="f.name"
+                class="file-row"
+                :class="{ selected: f.name === store.addSourceSelected }"
+                @click="f.kind === 'dir' ? store.openAddSourceFolder(f.name) : store.selectAddSourceFile(f.name)"
+              >
+                <span class="file-name"><i class="ph" :class="iconFor(f.kind)"></i>{{ f.name }}</span>
+                <span class="file-meta">{{ f.modified || "—" }}</span>
+                <span class="file-meta" style="text-align:right">{{ f.size || "" }}</span>
+              </div>
+            </template>
           </div>
         </div>
         <div class="file-preview">
           <i class="ph ph-file-text" style="color:var(--color-accent-300)"></i>
-          <span>/{{ store.addSourcePath.slice(1).join("/") }}/{{ store.addSourceSelected }}</span>
-          <span style="margin-left:auto;color:var(--color-neutral-500)">Combined format detected</span>
+          <span v-if="store.addSourceSelected">{{ store.addSourceRealPath }}/{{ store.addSourceSelected }}</span>
+          <span v-else style="color:var(--color-neutral-500)">No file selected</span>
         </div>
       </div>
 
@@ -72,35 +98,56 @@ function iconFor(kind) {
         <div class="file-browser" style="border-color:var(--color-accent-700)">
           <div class="file-browser-crumbs">
             <i class="ph ph-house-simple"></i>
-            <template v-for="(part, i) in store.addSourcePath" :key="i">
-              <span class="crumb" :class="{ current: i === store.addSourcePath.length - 1 }" @click="store.goToAddSourceCrumb(i)">{{ part }}</span>
-              <span v-if="i < store.addSourcePath.length - 1" class="crumb-sep">›</span>
+            <template v-for="(part, i) in crumbs" :key="i">
+              <span class="crumb" :class="{ current: i === crumbs.length - 1 }" @click="store.goToAddSourceCrumb(i)">{{ part }}</span>
+              <span v-if="i < crumbs.length - 1" class="crumb-sep">›</span>
             </template>
-            <span class="tag-pill" style="margin-left:auto">selected folder</span>
+            <label class="toggle-row compact" style="margin-left:auto" @click="store.setAddSourceHideHidden(!store.addSourceHideHidden)">
+              <span>Hide dot file</span>
+              <span class="toggle" :class="{ on: store.addSourceHideHidden }"><span class="knob"></span></span>
+            </label>
+            <div class="filterbar" style="max-width:120px">
+              <i class="ph ph-magnifying-glass"></i>
+              <input
+                :value="store.addSourceFilterText"
+                @input="store.setAddSourceFilterText($event.target.value)"
+                placeholder="Filter…"
+              >
+            </div>
           </div>
           <div class="file-browser-head"><span>Name</span><span>Modified</span><span style="text-align:right">Size</span></div>
           <div class="file-browser-list">
-            <div v-for="f in store.addSourceListing" :key="f.name" class="file-row" @click="f.kind === 'dir' && store.openAddSourceFolder(f.name)">
-              <span class="file-name"><i class="ph" :class="iconFor(f.kind)"></i>{{ f.name }}</span>
-              <span class="file-meta">{{ f.modified || "—" }}</span>
-              <span class="file-meta" style="text-align:right">{{ f.size || "" }}</span>
-            </div>
-          </div>
-          <div style="display:flex;justify-content:flex-end;padding:6px 10px;border-top:1px solid var(--chrome-border)">
-            <button class="chip outline" style="height:22px"><i class="ph ph-check"></i>Use this folder</button>
+            <template v-if="store.addSourceLoading">
+              <div v-for="i in 5" :key="i" class="file-row skel">
+                <span class="skel-bar" style="width:65%"></span><span class="skel-bar" style="width:50%"></span><span class="skel-bar" style="width:40%"></span>
+              </div>
+            </template>
+            <template v-else>
+              <div v-for="f in store.filteredAddSourceListing" :key="f.name" class="file-row" @click="f.kind === 'dir' && store.openAddSourceFolder(f.name)">
+                <span class="file-name"><i class="ph" :class="iconFor(f.kind)"></i>{{ f.name }}</span>
+                <span class="file-meta">{{ f.modified || "—" }}</span>
+                <span class="file-meta" style="text-align:right">{{ f.size || "" }}</span>
+              </div>
+            </template>
           </div>
         </div>
         <div style="display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center">
           <div>
             <div class="field-label">Match files</div>
-            <div class="cond-value" style="width:fit-content;height:28px">*.log</div>
+            <div class="cond-value" style="width:fit-content;height:28px">
+              <input
+                :value="store.addSourcePattern"
+                @input="store.setAddSourcePattern($event.target.value)"
+                style="background:none;border:none;color:inherit;font:inherit;outline:none;width:110px"
+              >
+            </div>
           </div>
-          <label class="toggle-row" style="padding-top:16px">
+          <label class="toggle-row" style="padding-top:16px" @click="store.setAddSourceIncludeSubfolders(!store.addSourceIncludeSubfolders)">
             <span>Include subfolders</span>
-            <span class="toggle on"><span class="knob"></span></span>
+            <span class="toggle" :class="{ on: store.addSourceIncludeSubfolders }"><span class="knob"></span></span>
           </label>
         </div>
-        <div class="hint-line"><i class="ph ph-info"></i>2 files match now (access.log, error.log) — new matching files added automatically</div>
+        <div class="hint-line"><i class="ph ph-info"></i>Matching files in this folder are ingested now, and new ones picked up automatically on each resync</div>
       </div>
 
       <!-- ===== SFTP tab ===== -->
@@ -143,7 +190,7 @@ function iconFor(kind) {
 
       <div class="modal-footer">
         <button class="btn-plain" @click="store.closeAddSourceDialog()">Cancel</button>
-        <button class="chip outline" @click="store.confirmAddSource()"><i class="ph ph-plus"></i>Add source</button>
+        <button class="chip outline" :style="canConfirm ? {} : { opacity: 0.5, cursor: 'default' }" :disabled="!canConfirm" @click="store.confirmAddSource()"><i class="ph ph-plus"></i>Add source</button>
       </div>
     </div>
   </div>

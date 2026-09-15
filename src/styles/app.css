@@ -126,14 +126,26 @@
   .caret-blink{width:6px;height:11px;background:var(--color-accent-400);display:inline-block;animation:sc-blink 1s step-end infinite}
   @keyframes sc-blink{50%{opacity:0}}
 
+  /* ===== loading states (design canvas turn 8) ===== */
+  @keyframes om-spin{to{transform:rotate(360deg)}}
+  .spin{display:inline-block;animation:om-spin 1s linear infinite}
+  @keyframes skel-pulse{0%,100%{opacity:1}50%{opacity:.5}}
+  .skel-bar{height:9px;border-radius:3px;background:#242737;animation:skel-pulse 1.4s ease-in-out infinite}
+  .tail-row.skel,.file-row.skel{cursor:default}
+  .sync-progress-bar{height:2px;background:var(--chrome-border);overflow:hidden;flex:none}
+  .sync-progress-bar>div{height:100%;background:var(--color-accent-500);transition:width .2s}
+
   /* ===== error/query/alerts dock ===== */
   .query-row{display:flex;align-items:center;gap:5px;height:28px;padding:0 6px;border-bottom:1px solid var(--chrome-border);flex:none}
   .query-body{flex:1;min-height:0;padding:8px 10px;display:flex;flex-direction:column;gap:6px;overflow:auto}
   .cond-row{display:flex;align-items:center;gap:6px}
   .cond-label{font:500 9.5px/1 var(--font-body);color:var(--color-neutral-600);width:34px;text-transform:uppercase;letter-spacing:.04em}
   .cond-label.and{text-align:right;text-transform:none;font-size:9.5px}
+  .query-name-input{height:22px;width:150px;padding:0 8px;border-radius:var(--radius-sm);background:var(--chrome-bg);border:1px solid var(--chrome-border-2);font:400 10.5px/1 ui-monospace,Menlo,monospace;color:var(--color-neutral-300);outline:none}
   .cond-field{display:flex;align-items:center;gap:4px;height:22px;padding:0 8px;border-radius:var(--radius-sm);background:var(--chrome-bg);border:1px solid var(--chrome-border-2);font:400 10.5px/1 ui-monospace,Menlo,monospace;color:var(--color-neutral-300);white-space:nowrap}
-  .cond-value{display:flex;align-items:center;height:22px;padding:0 8px;border-radius:var(--radius-sm);background:var(--chrome-bg);border:1px solid var(--color-accent-700);font:400 10.5px/1 ui-monospace,Menlo,monospace;color:var(--color-accent-200);flex:1;min-width:0}
+  select.cond-field{appearance:none;min-width:112px;outline:none}
+  select.cond-op{min-width:84px}
+  .cond-value{display:flex;align-items:center;height:22px;padding:0 8px;border-radius:var(--radius-sm);background:var(--chrome-bg);border:1px solid var(--color-accent-700);font:400 10.5px/1 ui-monospace,Menlo,monospace;color:var(--color-accent-200);flex:1;min-width:0;outline:none}
   .cond-x{font-size:10px;color:var(--color-neutral-700);cursor:pointer;flex:none}
   .add-cond{display:flex;align-items:center;gap:5px;height:22px;padding:0 8px;border:1px solid var(--color-accent-700);border-radius:var(--radius-sm);color:var(--color-accent-300);font:500 10.5px/1 var(--font-body);cursor:pointer;background:transparent}
   .edit-text{display:flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:var(--radius-sm);color:var(--color-neutral-600);font:400 10.5px/1 var(--font-body);cursor:pointer;background:transparent;border:none}
@@ -284,6 +296,7 @@
   .connected-row .ph{color:var(--st2)}
   .field-label{font:400 10.5px/1 var(--font-body);color:var(--color-neutral-500);margin-bottom:5px}
   .toggle-row{display:flex;align-items:center;justify-content:space-between;padding:4px 0;font:400 11.5px/1.3 var(--font-body);color:var(--color-neutral-200);cursor:pointer}
+  .toggle-row.compact{gap:7px;padding:0;font-size:10.5px;white-space:nowrap}
   .toggle{width:32px;height:18px;border-radius:9px;background:var(--color-neutral-700);position:relative;flex:none}
   .toggle.on{background:var(--color-accent-600)}
   .toggle .knob{position:absolute;left:2px;top:2px;width:14px;height:14px;border-radius:50%;background:var(--color-neutral-300)}

@@ -1,11 +1,16 @@
 <script setup>
-import { onMounted, onUnmounted } from "vue";
+import { computed, onMounted, onUnmounted } from "vue";
 import { useMonitorStore } from "../store/monitor";
 import { useRelativeTime } from "../composables/useRelativeTime";
-import { statusColor, msColor, fmtMs } from "../data/format";
+import { statusColor, msColor, fmtMs, fmtBytes } from "../data/format";
 
 const store = useMonitorStore();
 const syncedAgo = useRelativeTime(() => store.lastSyncedAt);
+const sourceCountLabel = computed(() => `${store.sources.length} source${store.sources.length === 1 ? "" : "s"}`);
+// tailLoading only covers the one-time startup hydrate — also show the
+// skeleton for the *first* sync after a source is added mid-session
+// (tail still empty, but a sync is actively running).
+const showTailSkeleton = computed(() => store.tailLoading || (store.isSyncing && store.tailRows.length === 0));
 
 const INTERVALS = [10000, 30000, 60000, 300000];
 function intervalLabel(ms) {
@@ -16,7 +21,10 @@ function cycleInterval() {
   store.setResyncInterval(INTERVALS[(i + 1) % INTERVALS.length]);
 }
 
-onMounted(() => store.startAutoResync());
+onMounted(async () => {
+  await store.hydrateTailRows();
+  store.startAutoResync();
+});
 onUnmounted(() => store.stopAutoResync());
 
 function onFilterKeydown(e) {
@@ -27,8 +35,11 @@ function onFilterKeydown(e) {
 <template>
   <div class="panel-fill">
     <div class="toolbar">
-      <div class="chip txt"><i class="ph ph-stack"></i>4 sources<span class="caret">▾</span></div>
-      <button class="chip accent" @click="store.resyncNow()"><i class="ph ph-arrows-clockwise"></i>Resync</button>
+      <div class="chip txt"><i class="ph ph-stack"></i>{{ sourceCountLabel }}<span class="caret">▾</span></div>
+      <button class="chip accent" :disabled="store.isSyncing" @click="store.resyncNow()">
+        <i class="ph" :class="store.isSyncing ? 'ph-spinner spin' : 'ph-arrows-clockwise'"></i>
+        {{ store.isSyncing ? (store.syncProgress ? `Syncing ${store.syncProgress.completed}/${store.syncProgress.total}` : "Syncing…") : "Resync" }}
+      </button>
       <button class="chip" @click="cycleInterval">{{ intervalLabel(store.resyncIntervalMs) }}<span class="caret">▾</span></button>
       <span class="synced-label">synced {{ syncedAgo }}</span>
       <div class="sep"></div>
@@ -46,6 +57,9 @@ function onFilterKeydown(e) {
       <i class="ph ph-eye" style="color:var(--color-neutral-600)"></i>
       <i class="ph ph-download-simple" style="color:var(--color-neutral-600)"></i>
     </div>
+    <div v-if="store.syncProgress" class="sync-progress-bar">
+      <div :style="{ width: (store.syncProgress.completed / store.syncProgress.total * 100) + '%' }"></div>
+    </div>
 
     <div class="stream-tabstrip">
       <div class="stream-tab active"><i class="ph ph-file-text"></i>shop · access.log<span class="close">×</span></div>
@@ -58,7 +72,15 @@ function onFilterKeydown(e) {
       <span class="sortable" @click="store.toggleSort()">Time<i class="ph" :class="store.tailSortDesc ? 'ph-caret-down' : 'ph-caret-up'"></i></span>
       <span>Client</span><span>Method</span><span>St</span><span>Request</span><span>Bytes</span><span>µs</span>
     </div>
-    <div class="tail-body">
+    <div v-if="showTailSkeleton" class="tail-body">
+      <div v-for="i in 8" :key="i" class="tail-row skel">
+        <span class="skel-bar" style="width:60%"></span><span class="skel-bar" style="width:80%"></span>
+        <span class="skel-bar" style="width:55%"></span><span class="skel-bar" style="width:40%"></span>
+        <span class="skel-bar" style="width:75%"></span><span class="skel-bar" style="width:50%"></span>
+        <span class="skel-bar" style="width:45%"></span>
+      </div>
+    </div>
+    <div v-else class="tail-body">
       <div
         v-for="r in store.filteredTailRows"
         :key="r.id"
@@ -71,7 +93,7 @@ function onFilterKeydown(e) {
         <span style="color:var(--color-accent-2-400)">{{ r.method }}</span>
         <span :style="{ color: statusColor(r.status), fontWeight: 600 }">{{ r.status }}</span>
         <span class="req">{{ r.path }}</span>
-        <span style="color:var(--color-neutral-600)">{{ r.bytes }}</span>
+        <span style="color:var(--color-neutral-600)">{{ fmtBytes(r.bytes) }}</span>
         <span class="ms" :style="{ color: msColor(r.ms) }">{{ fmtMs(r.ms) }}</span>
       </div>
     </div>

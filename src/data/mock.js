@@ -2,7 +2,7 @@
 // gets swapped out for a real Tauri log source later (see src/data/logSource.js) —
 // nothing outside this file and logSource.js should know or care that the
 // rows are fake.
-import { fmtBytes, nowClock } from "./format";
+import { nowClock } from "./format";
 
 let idCounter = 0;
 function nextId() {
@@ -11,27 +11,27 @@ function nextId() {
 }
 
 function row(time, ip, method, status, path, ms, bytes) {
-  return { id: nextId(), time, ip, method, status, path, ms, bytes };
+  return { id: nextId(), filePath: "/var/log/httpd/access.log", time, ip, method, status, path, ms, bytes };
 }
 
 export function seedTailRows() {
   return [
-    row("13:42:04.902", "198.51.100.23", "GET", 200, "/products/hydro-flask-32oz", 84, "18.4k"),
-    row("13:42:05.011", "203.0.113.47", "POST", 502, "/checkout/confirm?cart=8f21a", 3102, "1.0k"),
-    row("13:42:05.340", "192.0.2.180", "GET", 200, "/assets/app.4f2b.js", 12, "212k"),
-    row("13:42:05.588", "198.51.100.77", "GET", 304, "/assets/logo.svg", 6, "0"),
-    row("13:42:05.901", "203.0.113.12", "GET", 404, "/wp-login.php", 4, "412"),
-    row("13:42:06.118", "192.0.2.44", "GET", 200, "/api/v2/cart", 96, "3.1k"),
-    row("13:42:06.402", "198.51.100.23", "POST", 200, "/api/v2/cart/items", 148, "820"),
-    row("13:42:06.655", "203.0.113.90", "GET", 200, "/products?page=3&sort=price", 262, "44.1k"),
-    row("13:42:06.881", "192.0.2.201", "GET", 499, "/api/v2/search?q=bottle", 1420, "0"),
-    row("13:42:07.118", "203.0.113.47", "POST", 502, "/checkout/confirm?cart=8f21a", 3204, "1.0k"),
-    row("13:42:07.302", "198.51.100.5", "GET", 200, "/", 38, "26.7k"),
-    row("13:42:07.559", "192.0.2.88", "GET", 301, "/blog", 3, "0"),
-    row("13:42:07.744", "203.0.113.47", "POST", 500, "/checkout/confirm?cart=8f21a", 2870, "1.0k"),
-    row("13:42:07.990", "198.51.100.61", "GET", 200, "/products/steel-tumbler", 71, "17.2k"),
-    row("13:42:08.204", "192.0.2.150", "GET", 403, "/.env", 2, "199"),
-    row("13:42:08.455", "198.51.100.23", "GET", 200, "/api/v2/recommendations", 312, "9.4k"),
+    row("13:42:04.902", "198.51.100.23", "GET", 200, "/products/hydro-flask-32oz", 84, 18400),
+    row("13:42:05.011", "203.0.113.47", "POST", 502, "/checkout/confirm?cart=8f21a", 3102, 1000),
+    row("13:42:05.340", "192.0.2.180", "GET", 200, "/assets/app.4f2b.js", 12, 212000),
+    row("13:42:05.588", "198.51.100.77", "GET", 304, "/assets/logo.svg", 6, 0),
+    row("13:42:05.901", "203.0.113.12", "GET", 404, "/wp-login.php", 4, 412),
+    row("13:42:06.118", "192.0.2.44", "GET", 200, "/api/v2/cart", 96, 3100),
+    row("13:42:06.402", "198.51.100.23", "POST", 200, "/api/v2/cart/items", 148, 820),
+    row("13:42:06.655", "203.0.113.90", "GET", 200, "/products?page=3&sort=price", 262, 44100),
+    row("13:42:06.881", "192.0.2.201", "GET", 499, "/api/v2/search?q=bottle", 1420, 0),
+    row("13:42:07.118", "203.0.113.47", "POST", 502, "/checkout/confirm?cart=8f21a", 3204, 1000),
+    row("13:42:07.302", "198.51.100.5", "GET", 200, "/", 38, 26700),
+    row("13:42:07.559", "192.0.2.88", "GET", 301, "/blog", 3, 0),
+    row("13:42:07.744", "203.0.113.47", "POST", 500, "/checkout/confirm?cart=8f21a", 2870, 1000),
+    row("13:42:07.990", "198.51.100.61", "GET", 200, "/products/steel-tumbler", 71, 17200),
+    row("13:42:08.204", "192.0.2.150", "GET", 403, "/.env", 2, 199),
+    row("13:42:08.455", "198.51.100.23", "GET", 200, "/api/v2/recommendations", 312, 9400),
   ];
 }
 
@@ -84,8 +84,13 @@ export const CLIENTS = {
   "198.51.100.77": { rdns: "198-51-100-77.res.spectrum.net", geo: "US · AS7922", ua: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", bot: false, rate: "1.4k reqs/24h" },
 };
 
+// TODO: rDNS/Geo-ASN/bot-classification are fabricated demo data for the
+// mock IPs above — real values need a live DNS lookup, a GeoIP database,
+// and UA/behavior-based bot heuristics respectively, none of which exist
+// yet. Planned for a future commit; every real (non-mock) IP hits the
+// fallback below and shows as unimplemented rather than a fake value.
 export function clientInfo(ip) {
-  return CLIENTS[ip] || { rdns: "—", geo: "—", ua: "—", bot: false, rate: "—" };
+  return CLIENTS[ip] || { rdns: "not implemented yet", geo: "not implemented yet", ua: "—", bot: false, rate: "not implemented yet" };
 }
 
 const PATHS_POOL = [
@@ -109,7 +114,7 @@ export function makeLiveRow() {
     status,
     PATHS_POOL[Math.floor(Math.random() * PATHS_POOL.length)],
     Math.round(ms),
-    fmtBytes(bytes)
+    bytes
   );
 }
 
@@ -209,7 +214,7 @@ export const panelCatalog = [
     { id: "mix", icon: "ph-faders", name: "Status mix", desc: "2xx/3xx/4xx/5xx split and p95 for the current window" },
   ] },
   { group: "Structure", items: [
-    { id: "sources", icon: "ph-hard-drives", name: "Sources", desc: "Fleet → host → vhost → log file tree" },
+    { id: "sources", icon: "ph-hard-drives", name: "Sources", desc: "Registered log sources and their files" },
     { id: "saved", icon: "ph-bookmark-simple", name: "Saved filters", desc: "Bookmarked queries and cases" },
     { id: "alerts", icon: "ph-bell-ringing", name: "Alerts & thresholds", desc: "Firing rules and their recent history" },
     { id: "inspector", icon: "ph-magnifying-glass-plus", name: "Entry inspector", desc: "Full detail for one selected log line" },
@@ -217,20 +222,10 @@ export const panelCatalog = [
   ] },
 ];
 
-// ---- Add source dialog (t2) — a tiny mock filesystem, keyed by "/"-joined path. ----
-export const fileBrowserFS = {
-  "Home/var/log/httpd": [
-    { name: "apache2", kind: "dir" },
-    { name: "access.log", kind: "file", modified: "4s ago", size: "842 MB", format: "Combined format detected" },
-    { name: "error.log", kind: "file", modified: "2m ago", size: "61 MB" },
-    { name: "access.log.1.gz", kind: "archive", modified: "Yesterday", size: "118 MB" },
-    { name: "access.log.2.gz", kind: "archive", modified: "2 days ago", size: "109 MB" },
-  ],
-  "Home/var/log/httpd/apache2": [
-    { name: "ssl_access.log", kind: "file", modified: "1m ago", size: "44 MB", format: "Combined format detected" },
-    { name: "ssl_error.log", kind: "file", modified: "5m ago", size: "9 MB" },
-  ],
-};
+// ---- Add source dialog (t2) SFTP tab — a tiny mock filesystem, keyed by
+// "/"-joined path. The File/Directory tabs browse the real filesystem now
+// (see src/data/sourcesApi.js); SFTP browsing is still mocked pending M3
+// (a real SSH/SFTP client on the Rust side).
 export const sftpBrowserFS = {
   "/var/log": [
     { name: "httpd", kind: "dir" },
@@ -251,47 +246,4 @@ export function statusBarsData() {
     const h2 = 34 - h5 - h4 - h3;
     return { h5: h5 + "px", h4: h4 + "px", h3: h3 + "px", h2: h2 + "px" };
   });
-}
-
-export function sourcesTree() {
-  return [
-    { kind: "fleet", label: "edge-fleet", count: 18, expanded: true, children: [
-      { kind: "host", label: "web-01.iad", status: "var(--st2)", expanded: true, children: [
-        { kind: "vhost", label: "shop.example.com", expanded: true, children: [
-          { kind: "file", label: "access.log", icon: "ph-file-text", selected: true },
-          { kind: "file", label: "error.log", icon: "ph-file-text" },
-          { kind: "file", label: "access.log.1.gz", icon: "ph-archive", dim: true },
-        ] },
-        { kind: "vhost", label: "api.example.com", expanded: false, children: [
-          { kind: "file", label: "access.log", icon: "ph-file-text" },
-          { kind: "file", label: "error.log", icon: "ph-file-text" },
-        ] },
-        { kind: "vhost", label: "static.example.com", expanded: false, children: [
-          { kind: "file", label: "access.log", icon: "ph-file-text" },
-        ] },
-      ] },
-      { kind: "host", label: "web-02.iad", status: "var(--st2)", expanded: false, children: [
-        { kind: "vhost", label: "shop.example.com", expanded: false, children: [
-          { kind: "file", label: "access.log", icon: "ph-file-text" },
-        ] },
-      ] },
-      { kind: "host", label: "web-03.sfo", status: "var(--st4)", lag: "lag 4s", expanded: false, children: [
-        { kind: "vhost", label: "shop.example.com", expanded: false, children: [
-          { kind: "file", label: "access.log", icon: "ph-file-text" },
-        ] },
-      ] },
-      { kind: "host", label: "lb-01.iad", status: "var(--st2)", expanded: false, children: [
-        { kind: "vhost", label: "lb.example.com", expanded: false, children: [
-          { kind: "file", label: "access.log", icon: "ph-file-text" },
-        ] },
-      ] },
-    ] },
-    { kind: "fleet", label: "staging", count: 3, dim: true, expanded: false, children: [
-      { kind: "host", label: "stg-01", status: "var(--color-neutral-600)", expanded: false, children: [
-        { kind: "vhost", label: "shop.example.com", expanded: false, children: [
-          { kind: "file", label: "access.log", icon: "ph-file-text" },
-        ] },
-      ] },
-    ] },
-  ];
 }

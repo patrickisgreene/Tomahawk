@@ -1,9 +1,24 @@
 <script setup>
-const heights = [22, 34, 28, 44, 38, 52, 46, 70, 100, 86, 62, 48, 40, 36, 30, 33];
-function barColor(h, i) {
-  if (i === 8) return "#e08a86";
-  if (i === 9) return "#d9736f";
-  return h > 60 ? "var(--color-accent-600)" : "var(--color-accent-800)";
+import { onMounted } from "vue";
+import { useMonitorStore } from "../store/monitor";
+
+const store = useMonitorStore();
+
+onMounted(() => {
+  store.loadQueryFields().catch((e) => console.error("[query-fields]", e));
+});
+
+function barHeight(i) {
+  const rows = store.filteredTailRows;
+  if (!rows.length) return 8;
+  const bucketCount = 16;
+  const bucket = Math.floor((i / bucketCount) * rows.length);
+  const next = Math.floor(((i + 1) / bucketCount) * rows.length);
+  return Math.max(8, Math.round(((next - bucket) / Math.max(1, rows.length / bucketCount)) * 70));
+}
+
+function barColor(i) {
+  return i > 10 ? "var(--color-accent-600)" : "var(--color-accent-800)";
 }
 </script>
 
@@ -14,23 +29,53 @@ function barColor(h, i) {
       <i class="ph ph-play" style="color:var(--color-accent-300)"></i>
       <i class="ph ph-stop" style="color:var(--color-neutral-600)"></i>
       <div class="sep"></div>
-      <div class="chip txt">checkout 5xx hunt<span class="caret">▾</span></div>
-      <div class="chip txt"><i class="ph ph-floppy-disk"></i>Save</div>
-      <div class="query-meta">matched 3,418 of 1.2M · 214ms</div>
+      <input
+        class="query-name-input"
+        :value="store.queryName"
+        placeholder="Name search..."
+        @input="store.setQueryName($event.target.value)"
+      >
+      <button class="chip txt" @click="store.newQuery()"><i class="ph ph-plus"></i>New</button>
+      <button class="chip txt" @click="store.saveCurrentQuery()"><i class="ph ph-floppy-disk"></i>Save</button>
+      <div class="query-meta">
+        matched {{ store.queryMatchedRows.toLocaleString() }} of {{ store.queryTotalRows.toLocaleString() }}
+      </div>
     </div>
     <div class="query-body">
-      <div class="cond-row"><span class="cond-label">Where</span><div class="cond-field">status<span class="caret">▾</span></div><div class="cond-field">&gt;=<span class="caret">▾</span></div><div class="cond-value">400</div><i class="ph ph-x cond-x"></i></div>
-      <div class="cond-row"><span class="cond-label and">and</span><div class="cond-field">path<span class="caret">▾</span></div><div class="cond-field">matches<span class="caret">▾</span></div><div class="cond-value">^/checkout/.*</div><i class="ph ph-x cond-x"></i></div>
-      <div class="cond-row"><span class="cond-label and">and</span><div class="cond-field">upstream_us<span class="caret">▾</span></div><div class="cond-field">&gt;<span class="caret">▾</span></div><div class="cond-value" style="color:var(--color-neutral-400);border-color:var(--chrome-border-2)">500000</div><i class="ph ph-x cond-x"></i></div>
+      <div v-for="(condition, i) in store.queryConditions" :key="condition.id" class="cond-row">
+        <span class="cond-label" :class="{ and: i > 0 }">{{ i === 0 ? "Where" : "and" }}</span>
+        <select
+          class="cond-field"
+          :value="condition.field"
+          @change="store.updateQueryCondition(condition.id, { field: $event.target.value })"
+        >
+          <option v-for="field in store.queryFields" :key="field.id" :value="field.id">{{ field.label }}</option>
+        </select>
+        <select
+          class="cond-field cond-op"
+          :value="condition.operator"
+          @change="store.updateQueryCondition(condition.id, { operator: $event.target.value })"
+        >
+          <option v-for="operator in store.operatorsForField(condition.field)" :key="operator.id" :value="operator.id">
+            {{ operator.label }}
+          </option>
+        </select>
+        <input
+          class="cond-value"
+          :value="condition.value"
+          @input="store.updateQueryCondition(condition.id, { value: $event.target.value })"
+        >
+        <i class="ph ph-x cond-x" @click="store.removeQueryCondition(condition.id)"></i>
+      </div>
       <div class="cond-row" style="margin-top:2px">
-        <button class="add-cond"><i class="ph ph-plus"></i>Add condition</button>
+        <button class="add-cond" @click="store.addQueryCondition()"><i class="ph ph-plus"></i>Add condition</button>
         <button class="edit-text"><i class="ph ph-brackets-curly"></i>Edit as text</button>
       </div>
       <div class="hist">
         <div class="hist-bars">
-          <div v-for="(h, i) in heights" :key="i" :style="{ height: h + '%', background: barColor(h, i) }"></div>
+          <div v-for="i in 16" :key="i" :style="{ height: barHeight(i - 1) + '%', background: barColor(i - 1) }"></div>
         </div>
-        <div class="hist-labels"><span>13:28</span><span>13:35</span><span>13:42</span></div>
+        <div class="hist-labels"><span>oldest</span><span>current query</span><span>newest</span></div>
       </div>
     </div>
   </div>

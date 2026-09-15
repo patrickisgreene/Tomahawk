@@ -38,7 +38,7 @@ src/
   components/
     TopBar.vue, StatusBar.vue, MonitorPage.vue
     DockTabHeader.vue        generic reusable tab-strip (used by every dock)
-    SourcesPanel.vue + SourceTreeNode.vue (recursive)
+    SourcesTreePanel.vue        registered sources and per-directory file rows
     ThroughputPanel.vue, TopTalkersPanel.vue
     LiveTailPanel.vue + TrafficPanel.vue (Access log / Traffic tabs)
     BottomDock.vue + ErrorLogPanel.vue, QueryPanel.vue, AlertsPanel.vue

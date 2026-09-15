@@ -21,7 +21,8 @@ const kinds = [
       >{{ k.label }}</span>
     </div>
     <div class="talker-list">
-      <div class="talker-row" v-for="(r, i) in store.talkersData[store.talkerKind]" :key="i">
+      <div v-if="!store.topTalkers[store.talkerKind]?.length" class="tree-row dim">No rows ingested yet.</div>
+      <div class="talker-row" v-for="(r, i) in store.topTalkers[store.talkerKind]" :key="i">
         <div style="min-width:0">
           <div class="talker-label">{{ r.label }}</div>
           <div class="talker-bar-track"><div class="talker-bar-fill" :style="{ width: r.w }"></div></div>
