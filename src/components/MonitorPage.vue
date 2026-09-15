@@ -1,37 +1,33 @@
 <script setup>
-import SourcesPanel from "./SourcesPanel.vue";
-import ThroughputPanel from "./ThroughputPanel.vue";
-import TopTalkersPanel from "./TopTalkersPanel.vue";
-import LiveTailPanel from "./LiveTailPanel.vue";
-import BottomDock from "./BottomDock.vue";
-import StatusMixPanel from "./StatusMixPanel.vue";
-import InspectorPanel from "./InspectorPanel.vue";
+import Dock from "./Dock.vue";
 </script>
 
 <template>
   <div class="main">
     <div class="col-left">
-      <SourcesPanel />
+      <Dock dock-id="sources" />
       <div class="splitter horiz">···</div>
-      <ThroughputPanel />
+      <Dock dock-id="throughput" />
       <div class="splitter horiz">···</div>
-      <TopTalkersPanel />
+      <Dock dock-id="talkers" />
     </div>
-
     <div class="splitter vert">···</div>
-
     <div class="col-mid">
-      <LiveTailPanel />
+      <Dock dock-id="stream" />
       <div class="splitter horiz">···</div>
       <div class="col-mid-bottom">
-        <BottomDock />
+        <Dock dock-id="bottom" />
         <div class="splitter vert">···</div>
-        <StatusMixPanel />
+        <Dock dock-id="mix">
+          <template #trailing>
+            <div style="margin-left:auto;display:flex;gap:6px;color:var(--color-neutral-600);font-size:11px">
+              <i class="ph ph-arrows-out-line-horizontal"></i><i class="ph ph-pause"></i>
+            </div>
+          </template>
+        </Dock>
       </div>
     </div>
-
     <div class="splitter vert">···</div>
-
-    <InspectorPanel />
+    <Dock dock-id="inspector" />
   </div>
 </template>

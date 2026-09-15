@@ -205,12 +205,15 @@ export const panelCatalog = [
     { id: "query", icon: "ph-funnel", name: "Query builder", desc: "Visual field/operator conditions over any source" },
     { id: "traffic", icon: "ph-chart-line", name: "Status & latency charts", desc: "Hit volume, status-code mix, p95/p99 over time" },
     { id: "talkers", icon: "ph-ranking", name: "Top talkers", desc: "Ranked clients, paths, agents and referrers" },
+    { id: "throughput", icon: "ph-pulse", name: "Throughput", desc: "Req/s and 5xx rate sparklines" },
+    { id: "mix", icon: "ph-faders", name: "Status mix", desc: "2xx/3xx/4xx/5xx split and p95 for the current window" },
   ] },
   { group: "Structure", items: [
     { id: "sources", icon: "ph-hard-drives", name: "Sources", desc: "Fleet → host → vhost → log file tree" },
     { id: "saved", icon: "ph-bookmark-simple", name: "Saved filters", desc: "Bookmarked queries and cases" },
     { id: "alerts", icon: "ph-bell-ringing", name: "Alerts & thresholds", desc: "Firing rules and their recent history" },
     { id: "inspector", icon: "ph-magnifying-glass-plus", name: "Entry inspector", desc: "Full detail for one selected log line" },
+    { id: "history", icon: "ph-clock-counter-clockwise", name: "History", desc: "Recently viewed log lines" },
   ] },
 ];
 

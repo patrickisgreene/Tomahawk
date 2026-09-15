@@ -1,16 +1,10 @@
 <script setup>
 import { reactive, computed } from "vue";
 import { useMonitorStore } from "../store/monitor";
-import DockTabHeader from "./DockTabHeader.vue";
-import HistoryPanel from "./HistoryPanel.vue";
 import { statusColor, fmtMs, STATUS_TEXT } from "../data/format";
 import { clientInfo, synthRawLine, timingSplits } from "../data/mock";
 
 const store = useMonitorStore();
-const tabs = [
-  { id: "inspector", icon: "ph-magnifying-glass-plus", label: "Inspector" },
-  { id: "history", icon: "ph-clock-counter-clockwise", label: "History" },
-];
 const collapsed = reactive({});
 function toggle(id) {
   collapsed[id] = !collapsed[id];
@@ -46,12 +40,7 @@ function filterByEntry() {
 </script>
 
 <template>
-  <div class="dock">
-    <DockTabHeader dock-id="inspector" :tabs="tabs" :model-value="store.inspectorTab" @update:modelValue="store.setInspectorTab" />
-
-    <HistoryPanel v-if="store.inspectorTab === 'history'" />
-
-    <template v-else>
+  <div class="panel-fill">
     <div class="insp-search">
       <div class="chip txt"><i class="ph ph-list-dashes"></i>All fields<span class="caret">▾</span></div>
       <div class="filterbar"><i class="ph ph-magnifying-glass"></i><input placeholder="Filter fields…"></div>
@@ -154,6 +143,5 @@ function filterByEntry() {
         <span v-else style="margin-left:auto;color:var(--color-neutral-700)">0</span>
       </div>
     </div>
-    </template>
   </div>
 </template>

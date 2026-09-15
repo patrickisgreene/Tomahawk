@@ -24,7 +24,7 @@ function goTo(page) {
   store.closeGlobalSearch();
 }
 function filterByClient() {
-  store.setStreamTab("access");
+  store.openPanel("stream", "access");
   store.setTailFilter(`client=="${q.value}"`);
   store.closeGlobalSearch();
 }

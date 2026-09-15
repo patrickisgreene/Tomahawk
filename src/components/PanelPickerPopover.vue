@@ -10,6 +10,7 @@ const style = computed(() => {
   const a = store.panelPicker.anchor;
   return { left: a.x + "px", top: a.y + 6 + "px" };
 });
+const panelCount = computed(() => store.panelCatalog.reduce((n, g) => n + g.items.length, 0));
 </script>
 
 <template>
@@ -46,7 +47,7 @@ const style = computed(() => {
     <div class="popover-foot">
       <span><span class="kbd-hint-inline">↑↓</span> navigate</span>
       <span><span class="kbd-hint-inline">↵</span> add here</span>
-      <span style="margin-left:auto">12 panels</span>
+      <span style="margin-left:auto">{{ panelCount }} panels</span>
     </div>
   </div>
 </template>

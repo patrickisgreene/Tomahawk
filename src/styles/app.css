@@ -48,6 +48,7 @@
   .dock-tab.active{background:var(--color-surface);color:var(--color-text);font-weight:500}
   .dock-tab.active .ph{color:var(--color-accent-400)}
   .dock-tab .close{font-size:9px;opacity:.5}
+  .dock-tab .close:hover{opacity:1;color:var(--st5)}
   .dock-add{font-size:11px;color:var(--color-neutral-600);margin-left:2px;cursor:pointer;background:none;border:none}
   .badge-count{padding:0 4px;border-radius:3px;background:#3a2530;color:var(--st5);font:600 9px/14px var(--font-body)}
 
@@ -197,8 +198,8 @@
   .correlated-row{display:flex;align-items:center;gap:6px;height:25px;padding:0 8px;background:var(--chrome-bg);border-top:1px solid var(--chrome-border);font:500 11px/1 var(--font-body);color:var(--color-neutral-500)}
   .insp-empty{flex:1;display:flex;align-items:center;justify-content:center;color:var(--color-neutral-600);font:400 11.5px var(--font-body);text-align:center;padding:20px}
 
-  /* Generic "fill the rest of the dock" layout used by whichever of
-     Error log / Query / Alerts is the active tab in BottomDock.vue. */
+  /* Generic "fill the rest of the dock" layout used by every panel content
+     component rendered inside Dock.vue. */
   .panel-fill{flex:1;min-height:0;display:flex;flex-direction:column}
 
   /* ===== status bar ===== */
@@ -207,7 +208,7 @@
   .statusbar .push{margin-left:auto;display:flex;align-items:center;gap:5px}
   .statusbar .accent{color:var(--color-accent-300)}
 
-  /* ===== resync toolbar bits (LiveTailPanel) ===== */
+  /* ===== resync toolbar bits (AccessLogPanel) ===== */
   .synced-label{font:400 10px/1 ui-monospace,Menlo,monospace;color:var(--color-neutral-600);white-space:nowrap}
   .sortable{display:flex;align-items:center;gap:3px;cursor:pointer}
   .sortable .ph{font-size:9px;color:var(--color-accent-400)}

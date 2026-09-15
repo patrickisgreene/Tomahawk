@@ -9,15 +9,19 @@ import { useMonitorStore } from "../store/monitor";
 
 const props = defineProps({
   tabs: { type: Array, required: true }, // [{ id, icon, label, badge? }]
-  modelValue: { type: String, required: true },
+  modelValue: { type: String, default: null }, // null when the dock has no open tabs
   dockId: { type: String, default: "" },
 });
-defineEmits(["update:modelValue"]);
+const emit = defineEmits(["update:modelValue", "close"]);
 const store = useMonitorStore();
 
 function openPicker(e) {
   const rect = e.currentTarget.getBoundingClientRect();
   store.openPanelPicker(props.dockId, { x: rect.left, y: rect.bottom, width: rect.width, height: rect.height });
+}
+function closeTab(e, id) {
+  e.stopPropagation();
+  emit("close", id);
 }
 </script>
 
@@ -32,7 +36,7 @@ function openPicker(e) {
     >
       <i class="ph" :class="tab.icon"></i>{{ tab.label }}
       <span v-if="tab.badge != null" class="badge-count">{{ tab.badge }}</span>
-      <span class="close">×</span>
+      <span class="close" @click="closeTab($event, tab.id)">×</span>
     </button>
     <button class="dock-add" @click="openPicker"><i class="ph ph-plus"></i></button>
     <slot name="trailing" />

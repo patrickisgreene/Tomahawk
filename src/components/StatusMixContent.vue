@@ -1,7 +1,4 @@
 <script setup>
-import DockTabHeader from "./DockTabHeader.vue";
-
-const tabs = [{ id: "mix", icon: "ph-faders", label: "Status mix" }];
 const cells = [
   { lbl: "2xx", pct: 88.1, rate: "1.13k/s", color: "var(--st2)" },
   { lbl: "3xx", pct: 7.6, rate: "97/s", color: "var(--st3)" },
@@ -12,14 +9,7 @@ const cells = [
 </script>
 
 <template>
-  <div class="dock">
-    <DockTabHeader :tabs="tabs" model-value="mix">
-      <template #trailing>
-        <div style="margin-left:auto;display:flex;gap:6px;color:var(--color-neutral-600);font-size:11px">
-          <i class="ph ph-arrows-out-line-horizontal"></i><i class="ph ph-pause"></i>
-        </div>
-      </template>
-    </DockTabHeader>
+  <div class="panel-fill">
     <div class="mix-grid">
       <div v-for="c in cells" :key="c.lbl" class="mix-cell" :class="{ danger: c.danger }">
         <div class="lbl" :style="{ color: c.color }">{{ c.lbl }}</div>

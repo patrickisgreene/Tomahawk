@@ -1,9 +1,7 @@
 <script setup>
 import { useMonitorStore } from "../store/monitor";
-import DockTabHeader from "./DockTabHeader.vue";
 
 const store = useMonitorStore();
-const dockTabs = [{ id: "talkers", icon: "ph-ranking", label: "Top talkers" }];
 const kinds = [
   { id: "clients", label: "Clients" },
   { id: "paths", label: "Paths" },
@@ -13,8 +11,7 @@ const kinds = [
 </script>
 
 <template>
-  <div class="dock">
-    <DockTabHeader :tabs="dockTabs" model-value="talkers" />
+  <div class="panel-fill">
     <div class="talker-tabs">
       <span
         v-for="k in kinds"

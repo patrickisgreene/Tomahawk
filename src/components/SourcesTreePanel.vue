@@ -1,15 +1,12 @@
 <script setup>
 import { useMonitorStore } from "../store/monitor";
-import DockTabHeader from "./DockTabHeader.vue";
 import SourceTreeNode from "./SourceTreeNode.vue";
 
 const store = useMonitorStore();
-const tabs = [{ id: "sources", icon: "ph-hard-drives", label: "Sources" }];
 </script>
 
 <template>
-  <div class="dock">
-    <DockTabHeader dock-id="sources" :tabs="tabs" model-value="sources" />
+  <div class="panel-fill">
     <div class="search-row">
       <button class="btn-add-src" @click="store.openAddSourceDialog()"><i class="ph ph-plus"></i>Add source</button>
       <div class="filterbar">

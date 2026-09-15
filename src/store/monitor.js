@@ -26,11 +26,9 @@ export const useMonitorStore = defineStore("monitor", {
     _source: null,
     _resyncTimer: null,
 
-    activeStreamTab: "access", // access | traffic
     statusBars: statusBarsData(),
 
     // ---- inspector / history ----
-    inspectorTab: "inspector", // inspector | history
     history: [], // [{ id, time, status, method, path, viewedAt }], newest first
 
     // ---- sources tree ----
@@ -43,9 +41,28 @@ export const useMonitorStore = defineStore("monitor", {
 
     // ---- error log / bottom dock ----
     errors: seedErrors,
-    activeBottomTab: "query", // errlog | query | alerts
 
     bufferedBase: 12400,
+
+    // ---- docks: which panels are open where, and which is focused ----
+    dockTabs: {
+      stream: ["access", "traffic"],
+      bottom: ["errlog", "query", "alerts"],
+      inspector: ["inspector", "history"],
+      sources: ["sources"],
+      talkers: ["talkers"],
+      throughput: ["throughput"],
+      mix: ["mix"],
+    },
+    dockActiveTab: {
+      stream: "access",
+      bottom: "query",
+      inspector: "inspector",
+      sources: "sources",
+      talkers: "talkers",
+      throughput: "throughput",
+      mix: "mix",
+    },
 
     // ---- add source dialog (t2) ----
     showAddSourceDialog: false,
@@ -105,7 +122,7 @@ export const useMonitorStore = defineStore("monitor", {
       return sftpBrowserFS[state.sftpPath.join("/")] || [];
     },
     openPanelIds(state) {
-      return new Set(["sources", "talkers", state.activeStreamTab, state.activeBottomTab, state.inspectorTab]);
+      return new Set(Object.values(state.dockTabs).flat());
     },
     filteredPanelCatalog(state) {
       const q = (state.panelPicker?.query || "").trim().toLowerCase();
@@ -136,10 +153,6 @@ export const useMonitorStore = defineStore("monitor", {
     setTailFilter(text) {
       this.tailFilterText = text;
     },
-    setStreamTab(tab) {
-      this.activeStreamTab = tab;
-    },
-
     _ensureSource() {
       if (!this._source) this._source = createLogSource();
       return this._source;
@@ -172,16 +185,13 @@ export const useMonitorStore = defineStore("monitor", {
     },
 
     // ---- inspector / history ----
-    setInspectorTab(tab) {
-      this.inspectorTab = tab;
-    },
     clearHistory() {
       this.history = [];
     },
     reopenHistoryEntry(id) {
       if (this.tailRows.some((r) => r.id === id)) {
         this.selectRow(id);
-        this.inspectorTab = "inspector";
+        this.openPanel("inspector", "inspector");
       }
     },
 
@@ -205,11 +215,6 @@ export const useMonitorStore = defineStore("monitor", {
     // ---- top talkers ----
     setTalkerKind(kind) {
       this.talkerKind = kind;
-    },
-
-    // ---- bottom dock ----
-    setBottomTab(tab) {
-      this.activeBottomTab = tab;
     },
 
     // ---- add source dialog ----
@@ -268,6 +273,38 @@ export const useMonitorStore = defineStore("monitor", {
       this.showFileMenu = false;
     },
 
+    // ---- docks: open tabs per dock ----
+    // Switch which already-open tab is focused in a dock.
+    setDockTab(dockId, tabId) {
+      if (this.dockTabs[dockId]?.includes(tabId)) this.dockActiveTab[dockId] = tabId;
+    },
+    // Open a panel in a dock, focusing it. A panel only ever lives in one
+    // dock at a time, so opening it somewhere new moves it out of wherever
+    // it was open before (matching the "already open" hint in the picker).
+    openPanel(dockId, panelId) {
+      for (const [d, ids] of Object.entries(this.dockTabs)) {
+        const idx = ids.indexOf(panelId);
+        if (idx === -1) continue;
+        if (d === dockId) return void (this.dockActiveTab[dockId] = panelId);
+        ids.splice(idx, 1);
+        if (this.dockActiveTab[d] === panelId) this.dockActiveTab[d] = ids[ids.length - 1] ?? null;
+      }
+      if (!this.dockTabs[dockId]) this.dockTabs[dockId] = [];
+      this.dockTabs[dockId].push(panelId);
+      this.dockActiveTab[dockId] = panelId;
+    },
+    // Close a tab. If it was the focused one, focus its neighbor instead.
+    closeDockTab(dockId, panelId) {
+      const ids = this.dockTabs[dockId];
+      if (!ids) return;
+      const idx = ids.indexOf(panelId);
+      if (idx === -1) return;
+      ids.splice(idx, 1);
+      if (this.dockActiveTab[dockId] === panelId) {
+        this.dockActiveTab[dockId] = ids[Math.max(0, idx - 1)] ?? null;
+      }
+    },
+
     // ---- panel picker ----
     openPanelPicker(dockId, anchor) {
       this.panelPicker = { dockId, anchor, query: "" };
@@ -278,19 +315,8 @@ export const useMonitorStore = defineStore("monitor", {
     setPanelPickerQuery(q) {
       if (this.panelPicker) this.panelPicker.query = q;
     },
-    // Our docks are a fixed layout (no real drag-resize yet — see the
-    // design brief's own "keep it a mockup" fallback), so "adding" a panel
-    // can only mean switching to it where the clicked dock already has a
-    // tab for it. Anything else just closes the popover.
     choosePanelFromPicker(itemId) {
-      const dockId = this.panelPicker?.dockId;
-      if (dockId === "stream" && (itemId === "access" || itemId === "traffic")) {
-        this.activeStreamTab = itemId;
-      } else if (dockId === "bottom" && (itemId === "errlog" || itemId === "query" || itemId === "alerts")) {
-        this.activeBottomTab = itemId;
-      } else if (dockId === "inspector" && (itemId === "inspector" || itemId === "history")) {
-        this.inspectorTab = itemId;
-      }
+      if (this.panelPicker) this.openPanel(this.panelPicker.dockId, itemId);
       this.closePanelPicker();
     },
 

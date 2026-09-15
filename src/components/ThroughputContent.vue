@@ -1,15 +1,12 @@
 <script setup>
-import DockTabHeader from "./DockTabHeader.vue";
 import { useSparkline, toPolylinePoints } from "../composables/useSparkline";
 
-const tabs = [{ id: "throughput", icon: "ph-pulse", label: "Throughput" }];
 const spark = useSparkline({ count: 21, min: 4, max: 30, jitter: 6 });
 const errSpark = useSparkline({ count: 13, min: 2, max: 17, jitter: 5 });
 </script>
 
 <template>
-  <div class="dock">
-    <DockTabHeader :tabs="tabs" model-value="throughput" />
+  <div class="panel-fill">
     <div class="stat-block">
       <span class="stat-num">1,284</span><span class="stat-unit">req/s</span>
       <div class="stat-meta">avg 1,102 · min 640 · max 2,318</div>
