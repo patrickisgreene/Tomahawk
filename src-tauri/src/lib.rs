@@ -12,6 +12,7 @@ mod types;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             commands::list_local_dir,
             commands::add_source,
@@ -29,7 +30,6 @@ pub fn run() {
             commands::pull_new_rows,
             commands::pull_file,
             commands::load_recent_rows,
-            commands::check_latest_release,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
