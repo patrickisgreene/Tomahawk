@@ -50,6 +50,7 @@ function confirmRemove() {
           <span>{{ source.label }}</span>
           <span class="count">{{ source.rowCount }} rows</span>
           <span v-if="source.lastTs" class="lag">{{ formatRelative(source.lastTs) }}</span>
+          <span v-if="store.isSourceLoading(source.id)" class="loading-hint"><i class="ph ph-spinner spin"></i>loading</span>
           <span class="row-actions"><i class="ph ph-trash" title="Remove source" @click.stop="onRemove(source)"></i></span>
         </div>
         <div
@@ -60,7 +61,8 @@ function confirmRemove() {
           <div v-for="f in source.files" :key="f.path" class="tree-row file">
             <i class="ph ph-file-text" style="color:var(--color-neutral-600)"></i>
             <span>{{ f.name }}</span>
-            <span class="dot" :style="{ background: f.done ? 'var(--color-neutral-600)' : 'var(--st2)' }"></span>
+            <i v-if="store.isFileLoading(source.id, f.path)" class="ph ph-spinner spin file-loading" title="Loading this file"></i>
+            <i v-else class="dot" :style="{ background: f.done ? 'var(--color-neutral-600)' : 'var(--st2)' }"></i>
             <span class="count">{{ f.rowCount }} rows</span>
           </div>
         </div>

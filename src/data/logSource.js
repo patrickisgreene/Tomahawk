@@ -40,3 +40,13 @@ export async function loadRecentRows(limit) {
   if (!isTauri()) return [];
   return await invoke("load_recent_rows", { sourceIds: null, limit });
 }
+
+/**
+ * Ingests a single file for one source (the ingest itself runs on a
+ * background thread so the window never blocks) and resolves once that
+ * file is done. Returns { filePath, rows, done, rowCount }.
+ */
+export async function pullFile(sourceId, filePath, limit) {
+  if (!isTauri()) return { filePath, rows: [], done: false, rowCount: 0 };
+  return await invoke("pull_file", { sourceId, filePath, limit });
+}

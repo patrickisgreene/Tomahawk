@@ -28,6 +28,31 @@ export async function listSources() {
   return await invoke("list_sources");
 }
 
+export async function getSourceStats(sourceId) {
+  if (!isTauri()) return null;
+  return await invoke("get_source_stats", { sourceId });
+}
+
+/**
+ * Runs the SQL-backed access-log query (search text, domain/source/window/
+ * status filters and query-builder conditions are all applied against the
+ * *entire* database, then a page is returned for the requested offset).
+ * Resolves to { rows, total, universe }.
+ */
+export async function queryRows(filters, sortDesc, offset, limit) {
+  if (!isTauri()) return { rows: [], total: 0, universe: 0 };
+  return await invoke("query_rows", { input: filters, sortDesc, offset, limit });
+}
+
+/**
+ * Distinct hostnames on disk for the domain filter dropdown — sourced from
+ * the database, not the rows currently loaded in the frontend.
+ */
+export async function listDomains(sourceId) {
+  if (!isTauri()) return [];
+  return await invoke("list_domains", { sourceId: sourceId || null });
+}
+
 export async function listQueryFields() {
   if (!isTauri()) return [];
   return await invoke("list_query_fields");

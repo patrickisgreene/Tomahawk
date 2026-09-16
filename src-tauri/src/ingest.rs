@@ -47,6 +47,13 @@ fn save_cursor(conn: &Connection, file_path: &str, byte_offset: i64, size: i64, 
     Ok(())
 }
 
+/// Reports whether a file's cursor is marked fully ingested (rotation /
+/// gzip archives), so callers can surface that state in the UI without
+/// duplicating the cursor lookup.
+pub fn cursor_done(conn: &Connection, file_path: &str) -> bool {
+    load_cursor(conn, file_path).done
+}
+
 /// Reads whatever access-log lines are new in `path` since the last
 /// recorded cursor, parses them, batch-inserts them into `conn`, and
 /// returns just the newly added rows (for live-tail display).

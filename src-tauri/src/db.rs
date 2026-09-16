@@ -1,5 +1,8 @@
+use rusqlite::functions::{Context, FunctionFlags};
 use rusqlite::Connection;
+use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 
 use crate::config::source_db_path;
 
@@ -86,6 +89,29 @@ fn migrate(conn: &Connection) -> Result<(), String> {
     Ok(())
 }
 
+/// Registers a SQLite `regexp(text, pattern)` scalar function backed by the
+/// `regex` crate, so regex query-builder conditions can be pushed into SQL
+/// instead of filtering every row in Rust. The regexes are precompiled once
+/// per query and shared across every source connection, so a multi-million-row
+/// scan reuses them instead of recompiling on each row.
+pub fn register_regexp_fn(
+    conn: &mut Connection,
+    regexes: Arc<HashMap<String, regex::Regex>>,
+) -> Result<(), String> {
+    conn.create_scalar_function(
+        "regexp",
+        2,
+        FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
+        move |ctx: &Context| {
+            let text: &str = ctx.get_raw(0).as_str().unwrap_or_default();
+            let pattern: &str = ctx.get_raw(1).as_str().unwrap_or_default();
+            let matched = regexes.get(pattern).map(|re| re.is_match(text)).unwrap_or(false);
+            Ok(matched)
+        },
+    )
+    .map_err(|e| e.to_string())
+}
+
 pub fn delete_source_db(source_id: &str) -> Result<(), String> {
     let path = source_db_path(source_id)?;
     for ext in ["", "-wal", "-shm"] {
@@ -105,7 +131,7 @@ pub fn delete_source_db(source_id: &str) -> Result<(), String> {
 mod tests {
     use super::*;
 
-    #[test]
+#[test]
     fn migration_backfills_all_fields_and_preserves_rows_and_cursors() {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("CREATE TABLE access_rows (id INTEGER PRIMARY KEY, raw TEXT); CREATE TABLE cursors (byte_offset INTEGER); INSERT INTO cursors VALUES (1234);").unwrap();
@@ -115,7 +141,28 @@ mod tests {
         migrate(&conn).unwrap();
         let values: Vec<String> = conn.query_row("SELECT hostname, forwarded_for, ident, auth_user, timestamp, request, protocol FROM access_rows WHERE id = 42", [], |row| (0..7).map(|i| row.get(i)).collect()).unwrap();
         assert_eq!(values, ["example.com", "198.51.100.1, 192.0.2.2", "ident", "alice", "15/Sep/2026:00:00:08 -0400", "GET /test?q=1 HTTP/1.1", "HTTP/1.1"]);
-        assert_eq!(conn.query_row("SELECT COUNT(*) FROM access_rows", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
+assert_eq!(conn.query_row("SELECT COUNT(*) FROM access_rows", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
         assert_eq!(conn.query_row("SELECT byte_offset FROM cursors", [], |r| r.get::<_, i64>(0)).unwrap(), 1234);
+    }
+
+    #[test]
+    fn regexp_function_filters_rows_in_sql() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE t (path TEXT);
+             INSERT INTO t VALUES ('/a'), ('/?url=http://169.254.169.254/latest'), ('/?url=https://example.com/'), ('/c');",
+        )
+        .unwrap();
+        let pattern = "169\\.254|localhost|url=https?://";
+        let mut map = HashMap::new();
+        map.insert(
+            pattern.to_string(),
+            regex::RegexBuilder::new(pattern).case_insensitive(true).build().unwrap(),
+        );
+        register_regexp_fn(&mut conn, Arc::new(map)).unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM t WHERE regexp(path, ?1)", [pattern], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 2);
     }
 }

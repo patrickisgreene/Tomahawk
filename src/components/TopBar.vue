@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted } from "vue";
 import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, PanelBottomClose, PanelBottomOpen } from "@lucide/vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getVersion } from "@tauri-apps/api/app";
+import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useMonitorStore } from "../store/monitor";
 import { useRelativeTime } from "../composables/useRelativeTime";
@@ -18,7 +19,6 @@ const securityHighCount = computed(() => store.tailRows.reduce((count, row) => c
 // Checks the GitHub releases page so the badge stays hidden until a newer
 // release is published, then opens the release page when clicked.
 const REPO = "patrickisgreene/Tomahawk";
-const RELEASE_API = `https://api.github.com/repos/${REPO}/releases/latest`;
 const RELEASE_PAGE = `https://github.com/${REPO}/releases/latest`;
 const UPDATE_CHECK_MS = 30 * 60 * 1000;
 const updateAvailable = ref(false);
@@ -43,11 +43,10 @@ function isNewerVersion(candidate, current) {
 
 async function checkForUpdate() {
   try {
-    const res = await fetch(RELEASE_API, { headers: { Accept: "application/vnd.github+json" } });
-    if (!res.ok) return;
-    const release = await res.json();
-    if (isNewerVersion(parseVersion(release.tag_name), currentVersion)) {
-      releaseUrl.value = release.html_url || RELEASE_PAGE;
+    const release = await invoke("check_latest_release", { repo: REPO });
+    if (!release) return;
+    if (isNewerVersion(parseVersion(release.tagName), currentVersion)) {
+      releaseUrl.value = release.htmlUrl || RELEASE_PAGE;
       updateAvailable.value = true;
     }
   } catch {

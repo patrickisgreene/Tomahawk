@@ -17,6 +17,9 @@ pub fn run() {
             commands::add_source,
             commands::remove_source,
             commands::list_sources,
+            commands::get_source_stats,
+            commands::query_rows,
+            commands::list_domains,
             commands::list_query_fields,
             commands::geoip_status,
             commands::download_geoip_database,
@@ -24,7 +27,9 @@ pub fn run() {
             commands::reverse_dns,
             commands::lookup_network_details,
             commands::pull_new_rows,
+            commands::pull_file,
             commands::load_recent_rows,
+            commands::check_latest_release,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

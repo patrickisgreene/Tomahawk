@@ -14,10 +14,10 @@ const alerts = computed(() => {
 function showAlert(alert) {
   const patterns = { "path-traversal": "\\.\\.|%2e%2e", "sqli-probe": "union|select|sleep|%27|information_schema", "xss-probe": "<script|javascript:|onerror|alert\\(", "command-injection": "powershell|/bin/(sh|bash)|cmd\\.exe|jndi:", webshell: "c99|r57|shell\\.php|backdoor|antichat|indoxploit", "uploaded-executable": "\\.(jpg|png|gif)\\.php|/uploads/.*\\.php|/tmp/.*\\.php", "file-inclusion": "php://|data://|expect://|include=|\.\\.\\.\\.|https?://", "template-injection": "\\{\\{|\\$\\{\\s*7|__class__|<%|7\\*7", "ssrf-probe": "169.254.169.254|localhost|127.0.0.1|192.168.|10\\.|url=https?://|redirect=https?://", "obfuscated-payload": "%[0-9a-f]{2}%[0-9a-f]{2}|base64_decode|gzinflate|%u[0-9a-f]{4}", "debug-probe": "phpinfo|debug=1|verbose=1|trace=1", "config-probe": "\\.env|\\.git|wp-config|\\.htaccess|\\.bak|\\.htpasswd|\\.ssh", "login-probe": "wp-login|wp-admin|xmlrpc|phpmyadmin|admin|cpanel|webmin" };
   store.setTailFilter("");
-  store.queryConditions = [{ id: "alert-" + alert.id, field: "path", operator: "matches", value: patterns[alert.id] || alert.label }];
+  store.applyAlertConditions([{ id: "alert-" + alert.id, field: "path", operator: "matches", value: patterns[alert.id] || alert.label }]);
 }
 function clearAlertFilter() {
-  store.queryConditions = [];
+  store.applyAlertConditions([]);
 }
 </script>
 

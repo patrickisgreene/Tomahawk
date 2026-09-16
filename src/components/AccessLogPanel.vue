@@ -10,32 +10,23 @@ const draggedColumn = ref(null);
 const dragOverColumn = ref(null);
 const columnMenuOpen = ref(false);
 let relativeTimer;
-const totalRows = computed(() => store.sources.reduce((sum, source) => sum + (source.rowCount || 0), 0));
-const domains = computed(() => {
-  const values = store.tailRows
-    .filter((row) => !store.tailSourceId || row.id.startsWith(store.tailSourceId + ":"))
-    .map((row) => row.hostname?.toLowerCase()).filter((host) => host && host !== "-");
-  if (store.tailDomain) values.push(store.tailDomain);
-  return [...new Set(values)].sort();
-});
+const domains = computed(() => store.tailRows.map((row) => row.hostname?.toLowerCase()).filter((host) => host && host !== "-"));
 const sourceOptions = computed(() => [
   { value: "", label: `All sources (${store.sources.length})` },
   ...store.sources.map((source) => ({ value: source.id, label: source.label })),
 ]);
-const domainOptions = computed(() => [
-  { value: "", label: "All domains" },
-  ...domains.value.map((domain) => ({ value: domain, label: domain })),
-]);
+const domainOptions = computed(() => {
+  const options = store.domains.length ? store.domains : domains.value;
+  return [
+    { value: "", label: "All domains" },
+    ...options.map((domain) => ({ value: domain, label: domain })),
+  ];
+});
 const windowOptions = [
   { value: 0, label: "All loaded times" },
   { value: 900000, label: "Last 15m of log" },
   { value: 3600000, label: "Last hour of log" },
   { value: 86400000, label: "Last day of log" },
-];
-const limitOptions = [
-  { value: 400, label: "400 rows" },
-  { value: 1000, label: "1,000 rows" },
-  { value: 5000, label: "5,000 rows" },
 ];
 const statusOptions = [
   { value: 0, label: "All statuses" },
@@ -96,6 +87,23 @@ function endColumnDrag() {
   draggedColumn.value = null;
   dragOverColumn.value = null;
 }
+const scrollRef = ref(null);
+const headRef = ref(null);
+function syncHeaderScroll() {
+  if (scrollRef.value && headRef.value) {
+    headRef.value.style.transform = `translateX(-${scrollRef.value.scrollLeft}px)`;
+  }
+}
+// Infinite table: scrolling toward the bottom fetches the next SQL page for
+// the current filters (the whole database is searched, not just loaded rows).
+function onTableScroll() {
+  syncHeaderScroll();
+  const el = scrollRef.value;
+  if (!el) return;
+  if (el.scrollTop + el.clientHeight >= el.scrollHeight - 300) {
+    store.loadMoreQuery();
+  }
+}
 onMounted(async () => {
   await store.hydrateTailRows();
   store.startAutoResync();
@@ -111,15 +119,14 @@ onUnmounted(() => {
   <div class="panel-fill access-panel">
     <div class="toolbar access-toolbar">
       <div class="access-controls">
-      <AppSelect v-model="store.tailSourceId" :options="sourceOptions" aria-label="Source" />
-      <AppSelect v-model="store.tailDomain" :options="domainOptions" aria-label="Domain" />
-      <AppSelect v-model="store.tailWindowMs" :options="windowOptions" aria-label="Time window relative to newest loaded entry" />
-      <AppSelect :model-value="store.tailLimit" :options="limitOptions" aria-label="Loaded row limit" :disabled="loading || store.isSyncing" @update:model-value="store.setTailLimit($event)" />
-      <AppSelect v-model="store.tailMinStatus" :options="statusOptions" aria-label="Minimum status" />
+      <AppSelect :model-value="store.tailSourceId" :options="sourceOptions" aria-label="Source" @update:model-value="store.setTailSource($event)" />
+      <AppSelect :model-value="store.tailDomain" :options="domainOptions" aria-label="Domain" @update:model-value="store.setTailDomain($event)" />
+      <AppSelect :model-value="store.tailWindowMs" :options="windowOptions" aria-label="Time window relative to the newest entry" @update:model-value="store.setTailWindow($event)" />
+      <AppSelect :model-value="store.tailMinStatus" :options="statusOptions" aria-label="Minimum status" @update:model-value="store.setTailMinStatus($event)" />
       </div>
       <div class="filterbar">
         <i class="ph ph-funnel"></i>
-        <input :value="store.tailFilterText" @input="store.setTailFilter($event.target.value)" aria-label="Search loaded log fields" placeholder="Search all log fields...">
+        <input :value="store.tailFilterText" @input="store.setTailFilter($event.target.value)" aria-label="Search all log fields" placeholder="Search the entire database…">
         <button v-if="store.tailFilterText" class="icon-btn" aria-label="Clear search" @click="store.setTailFilter('')"><i class="ph ph-x"></i></button>
       </div>
       <div class="column-picker" :class="{ open: columnMenuOpen }">
@@ -157,25 +164,25 @@ onUnmounted(() => {
     </div>
     <div v-if="store.syncProgress" class="sync-progress-bar"><div :style="{ width: store.syncProgress.completed / store.syncProgress.total * 100 + '%' }"></div></div>
     <div v-if="store.syncError" role="alert" class="access-message">{{ store.syncError }}</div>
-    <div class="access-scroll">
+    <div class="tail-head access-head" :style="gridStyle" ref="headRef">
+      <span
+        v-for="[key, label] in visibleColumns"
+        :key="key"
+        class="tail-head-cell"
+        :class="{ dragging: draggedColumn === key, 'drag-over': dragOverColumn === key && draggedColumn !== key }"
+        draggable="true"
+        @dragstart="startColumnDrag($event, key)"
+        @dragover.prevent="dragOverColumn = key"
+        @dragleave="dragOverColumn === key && (dragOverColumn = null)"
+        @drop.prevent="dropColumn($event, key)"
+        @dragend="endColumnDrag"
+      >
+        <button v-if="key === 'timestamp'" class="time-sort" @click="store.toggleSort()">{{ timestampLabel }}<i class="ph" :class="store.tailSortDesc ? 'ph-caret-down' : 'ph-caret-up'"></i></button>
+        <template v-else><i class="ph ph-dots-six-vertical tail-head-drag"></i>{{ label }}</template>
+      </span>
+    </div>
+    <div class="access-scroll" ref="scrollRef" @scroll="onTableScroll">
       <div class="access-table">
-        <div class="tail-head" :style="gridStyle">
-          <span
-            v-for="[key, label] in visibleColumns"
-            :key="key"
-            class="tail-head-cell"
-            :class="{ dragging: draggedColumn === key, 'drag-over': dragOverColumn === key && draggedColumn !== key }"
-            draggable="true"
-            @dragstart="startColumnDrag($event, key)"
-            @dragover.prevent="dragOverColumn = key"
-            @dragleave="dragOverColumn === key && (dragOverColumn = null)"
-            @drop.prevent="dropColumn($event, key)"
-            @dragend="endColumnDrag"
-          >
-            <button v-if="key === 'timestamp'" class="time-sort" @click="store.toggleSort()">{{ timestampLabel }}<i class="ph" :class="store.tailSortDesc ? 'ph-caret-down' : 'ph-caret-up'"></i></button>
-            <template v-else><i class="ph ph-dots-six-vertical tail-head-drag"></i>{{ label }}</template>
-          </span>
-        </div>
         <template v-if="loading">
           <div v-for="i in 8" :key="i" class="tail-row skel" :style="gridStyle"><span v-for="[key] in visibleColumns" :key="key" class="skel-bar"></span></div>
         </template>
@@ -184,9 +191,11 @@ onUnmounted(() => {
             <span v-for="[key] in visibleColumns" :key="key" :title="titleFor(row, key)" :style="key === 'status' ? { color: statusColor(row.status) } : {}">{{ valueFor(row, key) }}</span>
           </div>
         </template>
+        <div v-if="store.queryLoading" class="access-more"><i class="ph ph-circle-notch spin"></i> Loading more rows…</div>
+        <div v-else-if="!store.queryHasMore && store.tailRows.length" class="access-more">Reached the beginning of the log.</div>
       </div>
-      <div v-if="!loading && !store.filteredTailRows.length" class="access-message">No loaded rows match the current filters.</div>
+      <div v-if="!loading && !store.filteredTailRows.length" class="access-message">No rows match the current filters.</div>
     </div>
-    <div class="tail-foot"><span>{{ store.filteredTailRows.length.toLocaleString() }} matched / {{ store.tailRows.length.toLocaleString() }} loaded rows</span><span style="margin-left:auto;color:var(--color-text)">{{ totalRows.toLocaleString() }} total rows</span></div>
+    <div class="tail-foot"><span>{{ store.filteredTailRows.length.toLocaleString() }} shown · {{ store.queryMatchedRows.toLocaleString() }} matched</span><span style="margin-left:auto;color:var(--color-text)">{{ store.queryUniverse.toLocaleString() }} total rows</span></div>
   </div>
 </template>

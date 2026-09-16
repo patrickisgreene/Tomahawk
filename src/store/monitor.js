@@ -4,13 +4,16 @@ import {
   hostsData, dayBarsData, topPagesData, topAgentsData, alertRules,
   panelCatalog, statusBarsData,
 } from "../data/mock";
-import { createLogSource, isTauri, loadRecentRows } from "../data/logSource";
-import { listLocalDir, addSource as addSourceApi, removeSource as removeSourceApi, listSources, listQueryFields } from "../data/sourcesApi";
+import { createLogSource, isTauri, pullFile } from "../data/logSource";
+import { listLocalDir, addSource as addSourceApi, removeSource as removeSourceApi, listSources, getSourceStats, listQueryFields, queryRows as queryRowsApi, listDomains as listDomainsApi } from "../data/sourcesApi";
 import { geoipStatus, lookupGeoip, reverseDns, lookupNetworkDetails } from "../data/geoipApi";
 import { joinLocalPath, localPathCrumbs } from "../data/localPath";
 
 
 const MAX_HISTORY = 60;
+// Rows fetched per SQL query page — the access-log table is an infinite
+// scroll over the database, so this is a scroll step, not a data limit.
+const QUERY_PAGE_SIZE = 1000;
 const SAVED_QUERIES_KEY = "tomahawk.savedQueries";
 const SETTINGS_KEY = "tomahawk.settings";
 const WORKSPACES_KEY = "tomahawk.workspaces";
@@ -222,7 +225,18 @@ export const useMonitorStore = defineStore("monitor", {
     tailLoading: false,
     selectedRowId: null,
     tailFilterText: "",
-    tailLimit: 400,
+    // The table is an infinite scroll over the whole database: every query
+    // (search box, source/domain/window/status filters, query-builder
+    // conditions) runs in SQL against *all* rows. `tailRows` is only the
+    // window fetched so far; `queryResultTotal` is the full DB match count.
+    queryPageSize: QUERY_PAGE_SIZE,
+    queryOffset: 0,
+    queryResultTotal: 0,
+    queryUniverse: 0,
+    queryHasMore: false,
+    queryLoading: false,
+    _querySeq: 0,
+    _queryTimer: null,
     panelVisibility: { left: true, right: true, bottom: true },
     panelSizes: loadPanelSizes(),
     tailSourceId: "",
@@ -230,12 +244,16 @@ export const useMonitorStore = defineStore("monitor", {
     tailWindowMs: 0,
     tailMinStatus: 0,
     tailSortDesc: true, // newest first, matches the design's default caret
+    // Distinct hostnames on disk (for the domain filter dropdown), refreshed
+    // from the database after sync / source changes.
+    domains: [],
     accessColumnLayout: normalizeAccessColumnLayout(),
     resyncIntervalMs: 1800000,
     lastSyncedAt: Date.now(),
     syncError: null,
     isSyncing: false,
     syncProgress: null, // { completed, total } | null — only set during a real per-source sync
+    syncActiveFiles: [], // [{ sourceId, filePath }] — files currently being ingested, for the sources panel
     _source: null,
     _resyncTimer: null,
 
@@ -346,6 +364,11 @@ export const useMonitorStore = defineStore("monitor", {
       return state.tailRows.find((r) => r.id === state.selectedRowId) || null;
     },
     filteredTailRows(state) {
+      // In the desktop app every row has already been filtered and ordered
+      // by the backend query_rows — no client-side re-filter needed.
+      if (isTauri()) return state.tailRows;
+      // Browser dev preview: no real database; apply the old client-side
+      // filtering so the mock seed rows still respond to the toolbar.
       const q = state.tailFilterText.trim().toLowerCase();
       const sourceRows = state.tailRows.filter((r) => !state.tailSourceId || r.id.startsWith(`${state.tailSourceId}:`));
       const latest = sourceRows.reduce((ts, r) => Math.max(ts, r.ts || 0), 0);
@@ -359,10 +382,12 @@ export const useMonitorStore = defineStore("monitor", {
       return state.tailSortDesc ? queried.slice().reverse() : queried;
     },
     queryTotalRows(state) {
-      return state.tailRows.length;
+      // "of N" in the query panel: rows in the involved sources, regardless
+      // of any filter — the total universe the DB contains.
+      return state.queryUniverse;
     },
     queryMatchedRows(state) {
-      return state.tailRows.filter((r) => state.queryConditions.every((c) => conditionMatches(r, c, state.queryFieldList))).length;
+      return state.queryResultTotal;
     },
     queryFields() {
       return this.queryFieldList;
@@ -516,6 +541,85 @@ export const useMonitorStore = defineStore("monitor", {
     },
     toggleSort() {
       this.tailSortDesc = !this.tailSortDesc;
+      this._refreshQuerySoon(0);
+    },
+    // ---- SQL-backed table query ----
+    _queryInput() {
+      return {
+        sourceId: this.tailSourceId || null,
+        domain: this.tailDomain || null,
+        minStatus: this.tailMinStatus || 0,
+        windowMs: this.tailWindowMs || 0,
+        text: this.tailFilterText.trim() || null,
+        conditions: this.queryConditions.map((c) => ({ field: c.field, operator: c.operator, value: c.value })),
+      };
+    },
+    // Debounced re-query for filter inputs (search text / query builder typing).
+    _refreshQuerySoon(delay) {
+      if (this._queryTimer) clearTimeout(this._queryTimer);
+      this._queryTimer = setTimeout(() => {
+        this._queryTimer = null;
+        this.refreshQuery().catch(() => {});
+      }, delay);
+    },
+    // The query-builder conditions mutate their object in place (updateQueryCondition
+    // assigns onto the existing condition), so `_queryInput()` is stable.
+    async refreshQuery(showLoading = true) {
+      if (!isTauri()) {
+        this.queryResultTotal = this.tailRows.length;
+        this.queryUniverse = this.tailRows.length;
+        this.queryOffset = 0;
+        this.queryHasMore = false;
+        this.tailLoading = false;
+        return;
+      }
+      const seq = ++this._querySeq;
+      if (showLoading) this.tailLoading = true;
+      this.queryLoading = true;
+      let result = null;
+      try {
+        result = await queryRowsApi(this._queryInput(), this.tailSortDesc, 0, this.queryPageSize);
+      } catch (error) {
+        if (!this.isSyncing) this.syncError = `Could not query log rows: ${String(error)}`;
+      } finally {
+        if (seq === this._querySeq) {
+          this.queryLoading = false;
+          this.tailLoading = false;
+        }
+      }
+      if (seq !== this._querySeq || !result) return;
+      this.tailRows = result.rows;
+      this.queryOffset = result.rows.length;
+      this.queryResultTotal = result.total;
+      this.queryUniverse = result.universe;
+      this.queryHasMore = result.rows.length >= this.queryPageSize && result.rows.length < result.total;
+    },
+    // Fetches the next page and appends it — the infinite-scroll step.
+    async loadMoreQuery() {
+      if (!isTauri() || this.queryLoading || !this.queryHasMore || !this.tailRows.length) return;
+      const seq = this._querySeq;
+      this.queryLoading = true;
+      let result = null;
+      try {
+        result = await queryRowsApi(this._queryInput(), this.tailSortDesc, this.queryOffset, this.queryPageSize);
+      } catch (error) {
+        if (!this.isSyncing) this.syncError = `Could not load more rows: ${String(error)}`;
+      }
+      this.queryLoading = false;
+      if (seq !== this._querySeq || !result || !result.rows.length) return;
+      this.tailRows = this.tailRows.concat(result.rows);
+      this.queryOffset += result.rows.length;
+      this.queryResultTotal = result.total;
+      this.queryUniverse = result.universe;
+      this.queryHasMore = result.rows.length >= this.queryPageSize && this.queryOffset < result.total;
+    },
+    async refreshDomains() {
+      if (!isTauri()) return;
+      try {
+        this.domains = (await listDomainsApi(this.tailSourceId || null)).sort((a, b) => a.localeCompare(b));
+      } catch (error) {
+        console.error("[domains]", error);
+      }
     },
     workspaceSnapshot() {
       return {
@@ -580,11 +684,24 @@ togglePanel(side) {
     },
     setTailFilter(text) {
       this.tailFilterText = text;
+      this._refreshQuerySoon(300);
     },
-    async setTailLimit(limit) {
-      if (![400, 1000, 5000].includes(limit)) return;
-      this.tailLimit = limit;
-      await this.hydrateTailRows();
+    setTailSource(sourceId) {
+      this.tailSourceId = sourceId;
+      this._refreshQuerySoon(0);
+      this.refreshDomains();
+    },
+    setTailDomain(domain) {
+      this.tailDomain = domain;
+      this._refreshQuerySoon(0);
+    },
+    setTailWindow(windowMs) {
+      this.tailWindowMs = windowMs;
+      this._refreshQuerySoon(0);
+    },
+    setTailMinStatus(minStatus) {
+      this.tailMinStatus = minStatus;
+      this._refreshQuerySoon(0);
     },
     setAccessColumnVisible(key, visible) {
       if (!this.accessColumnLayout.order.includes(key)) return;
@@ -621,48 +738,85 @@ togglePanel(side) {
     // a file's tailing cursor is already caught up. Call once on mount,
     // before the resync loop takes over incrementally.
     async hydrateTailRows() {
-      this.tailLoading = true;
       this.syncError = null;
-      try {
-        this.tailRows = await loadRecentRows(this.tailLimit);
-      } catch (error) {
-        this.syncError = `Could not load log rows: ${String(error)}`;
-      } finally {
-        this.tailLoading = false;
-      }
+      await this.refreshQuery(true);
+      this.refreshDomains();
     },
     async refreshSourceData() {
       await this.loadSources();
-      this.tailRows = await loadRecentRows(this.tailLimit);
+      await this.refreshSourceStats();
+      await this.refreshQuery(true);
       if (this.selectedRowId && !this.tailRows.some((r) => r.id === this.selectedRowId)) {
         this.selectedRowId = null;
       }
       this.history = this.history.filter((h) => this.tailRows.some((r) => r.id === h.id));
     },
-    // Pulls per source, sequentially, rather than one bulk call across every
-    // source — that's what makes real per-source sync progress
-    // possible instead of just an opaque "please wait".
+    // Pulls individually, rather than one bulk call across every source —
+    // that's what makes real per-source sync progress possible instead of
+    // just an opaque "please wait".
+    // When the backend reports the file list, each file is pulled on its own
+    // (still backgrounded in Rust) so the sources panel can show exactly
+    // which file is loading and update its counters as it finishes.
+    //
+    // The table shows what's in SQLite (query_rows), so the rows returned by
+    // each pull are not appended to `tailRows` — instead the current page is
+    // re-queried after each finished source (only when viewing the top page,
+    // so a deep scroll isn't disrupted), and the sources panel's counters
+    // come from the pull result directly.
     async _pull() {
       if (this.isSyncing) return;
       this.isSyncing = true;
       this.syncError = null;
       try {
         const source = this._ensureSource();
-        await this.loadSources(); // fresh source list before deciding how to sync
+        await this.loadSources(); // fast: sources appear in the panel immediately
         const ids = this.sources.map((s) => s.id);
         if (!ids.length) {
           const rows = await source.pull();
           this.tailRows.push(...rows);
         } else {
           this.syncProgress = { total: ids.length, completed: 0 };
+          // Fill in real counts/cursors before pulling, so the tree shows what
+          // is already imported and fully-ingested files can be skipped fast.
+          await this.refreshSourceStats();
           for (const id of ids) {
-            const rows = await source.pull(id);
-            this.tailRows.push(...rows);
+            const info = this.sources.find((s) => s.id === id);
+            const files = info?.files?.length ? info.files : null;
+            if (!files || !isTauri()) {
+              const rows = await source.pull(id);
+              this.tailRows.push(...rows);
+            } else {
+              this.syncActiveFiles = files.map((f) => ({ sourceId: id, filePath: f.path }));
+              for (const f of files) {
+                try {
+                  if (f.done) continue; // rotated/gz archive already imported
+                  const result = await pullFile(id, f.path, 200);
+                  // Patch the live source tree so counts/done states tick up
+                  // as each file finishes.
+                  const sourceInfo = this.sources.find((s) => s.id === id);
+                  const fileInfo = sourceInfo?.files?.find((x) => x.path === f.path);
+                  if (sourceInfo && fileInfo) {
+                    fileInfo.rowCount = result.rowCount;
+                    fileInfo.done = result.done;
+                    sourceInfo.rowCount = (sourceInfo.files || []).reduce((sum, x) => sum + x.rowCount, 0);
+                  }
+                } catch (error) {
+                  this.syncError = this.syncError ? `${this.syncError}; ${String(error)}` : String(error);
+                } finally {
+                  this.syncActiveFiles = this.syncActiveFiles.filter((x) => !(x.sourceId === id && x.filePath === f.path));
+                }
+              }
+              this.syncActiveFiles = [];
+            }
             this.syncProgress.completed++;
+            // Refresh the visible top page as each source finishes, so the
+            // table fills in progressively during a big import without the
+            // user waiting for the whole sync to finish.
+            if (this.queryOffset === 0) await this.refreshQuery(false).catch(() => {});
           }
-          await this.loadSources(); // refresh row counts now that ingestion finished
+          await this.refreshSourceStats(); // authoritative counts once ingestion is done
+          this.refreshDomains();
         }
-        if (this.tailRows.length > this.tailLimit) this.tailRows.splice(0, this.tailRows.length - this.tailLimit);
         this.lastSyncedAt = Date.now();
         this.statusBars = statusBarsData();
       } catch (error) {
@@ -671,6 +825,7 @@ togglePanel(side) {
       } finally {
         this.isSyncing = false;
         this.syncProgress = null;
+        this.syncActiveFiles = [];
       }
     },
     // The manual "Resync" button: pulls immediately and restarts the
@@ -717,6 +872,15 @@ togglePanel(side) {
       if (i === -1) this.expandedSourceIds.push(id);
       else this.expandedSourceIds.splice(i, 1);
     },
+    // True while any of the source's files are being ingested — the sources
+    // panel shows a spinner on the row during this.
+    isSourceLoading(sourceId) {
+      return this.syncActiveFiles.some((x) => x.sourceId === sourceId);
+    },
+    // True while that specific file is being ingested.
+    isFileLoading(sourceId, filePath) {
+      return this.syncActiveFiles.some((x) => x.sourceId === sourceId && x.filePath === filePath);
+    },
     async removeSource(id) {
       await removeSourceApi(id);
       await this.refreshSourceData();
@@ -745,9 +909,11 @@ togglePanel(side) {
     },
     addQueryCondition() {
       this.queryConditions.push(defaultQueryCondition());
+      this._refreshQuerySoon(300);
     },
     removeQueryCondition(id) {
       this.queryConditions = this.queryConditions.filter((c) => c.id !== id);
+      this._refreshQuerySoon(300);
     },
     updateQueryCondition(id, patch) {
       const condition = this.queryConditions.find((c) => c.id === id);
@@ -759,6 +925,7 @@ togglePanel(side) {
           condition.operator = allowed[0]?.id || "=";
         }
       }
+      this._refreshQuerySoon(300);
     },
     setQueryName(name) {
       this.queryName = name;
@@ -776,6 +943,18 @@ togglePanel(side) {
       this.activeSavedQueryId = null;
       this.queryName = "";
       this.queryConditions = [];
+      this._refreshQuerySoon(0);
+    },
+    // Replaces the query-builder conditions (e.g. from an alerts click) and
+    // re-runs the SQL query so the table reflects them immediately.
+    applyAlertConditions(conditions) {
+      this.queryConditions = conditions.map((c) => ({
+        id: c.id || `query_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+        field: c.field,
+        operator: c.operator,
+        value: String(c.value ?? ""),
+      }));
+      this._refreshQuerySoon(0);
     },
     saveCurrentQuery() {
       const name = this.queryName.trim();
@@ -795,6 +974,7 @@ togglePanel(side) {
       this.queryName = saved.name;
       this.queryConditions = saved.conditions.map((c) => ({ ...defaultQueryCondition(), ...c }));
       this.activeSavedQueryId = saved.id;
+      this._refreshQuerySoon(0);
     },
     removeSavedQuery(id) {
       this.savedQueries = this.savedQueries.filter((q) => q.id !== id);
@@ -914,6 +1094,21 @@ togglePanel(side) {
     },
     async loadSources() {
       this.sources = await listSources();
+    },
+    // Fills the fast source list in with real DB stats (row counts, per-file
+    // cursors), one source at a time so the tree populates progressively
+    // instead of waiting for all the COUNT queries to finish.
+    async loadSourceStats(sourceId) {
+      const stats = await getSourceStats(sourceId);
+      if (!stats) return;
+      const source = this.sources.find((s) => s.id === sourceId);
+      if (!source) return;
+      source.rowCount = stats.rowCount;
+      source.lastTs = stats.lastTs;
+      source.files = stats.files;
+    },
+    async refreshSourceStats() {
+      await Promise.all(this.sources.map((s) => this.loadSourceStats(s.id).catch(() => {})));
     },
     async confirmAddSource() {
       if (this.addSourceSaving) return;

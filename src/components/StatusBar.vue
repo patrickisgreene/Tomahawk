@@ -20,7 +20,7 @@ const intervalLabel = computed(() => {
     <span v-if="store.syncError" class="status-error status-error-tip" tabindex="0">sync error
       <span class="status-error-popover" role="tooltip">{{ store.syncError }}</span>
     </span>
-    <span class="push" style="display:flex;align-items:center;gap:5px"><i class="ph ph-files"></i>{{ sourceFileCount }} log files · {{ store.tailRows.length.toLocaleString() }} loaded</span>
+    <span class="push" style="display:flex;align-items:center;gap:5px"><i class="ph ph-files"></i>{{ sourceFileCount }} log files · {{ store.queryMatchedRows.toLocaleString() }} matched rows</span>
     <span style="display:flex;align-items:center;gap:5px"><i class="ph ph-clock"></i>{{ timezone }}</span>
     <span style="display:flex;align-items:center;gap:5px"><i class="ph ph-database"></i>{{ store.bufferedCount }} buffered</span>
     <span class="accent" style="display:flex;align-items:center;gap:5px"><i class="ph ph-plugs-connected"></i>{{ store.sources.length }} sources</span>

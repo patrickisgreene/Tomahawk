@@ -10,6 +10,7 @@ const props = defineProps({
   menuWidth: { type: Number, default: 0 },
   buttonClass: { type: [String, Array, Object], default: "" },
 });
+defineOptions({ inheritAttrs: false });
 const emit = defineEmits(["update:modelValue"]);
 
 const open = ref(false);
@@ -108,6 +109,7 @@ onBeforeUnmount(close);
     :aria-label="ariaLabel"
     :aria-expanded="open"
     aria-haspopup="listbox"
+    v-bind="$attrs"
     @click="toggle"
     @keydown="onKeydown"
   >
