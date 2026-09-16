@@ -35,14 +35,24 @@ function formatDateParts(date, utc) {
   return `${year}-${pad2(month)}-${pad2(day)} ${pad2(hours)}:${pad2(minutes)}:${pad2(seconds)}`;
 }
 
+function formatShortDateParts(date, utc) {
+  const month = (utc ? date.getUTCMonth() : date.getMonth()) + 1;
+  const day = utc ? date.getUTCDate() : date.getDate();
+  const hours = utc ? date.getUTCHours() : date.getHours();
+  const minutes = utc ? date.getUTCMinutes() : date.getMinutes();
+  return `${pad2(month)}/${pad2(day)} ${pad2(hours)}:${pad2(minutes)}`;
+}
+
 // Keep one fixed timestamp shape while switching which timezone supplies
 // the date/time parts. `source` returns the original log timestamp string.
-export function formatTimestamp(rowOrTs, mode = "local") {
-  if (mode === "source" && rowOrTs && typeof rowOrTs === "object") return rowOrTs.timestamp || "-";
+export function formatTimestamp(rowOrTs, mode = "local", displayFormat = "full") {
+  if ((mode === "source" || displayFormat === "source") && rowOrTs && typeof rowOrTs === "object") return rowOrTs.timestamp || "-";
   const ts = rowOrTs && typeof rowOrTs === "object" ? rowOrTs.ts : rowOrTs;
   if (ts == null || !Number.isFinite(ts)) return "-";
+  if (displayFormat === "relative") return formatRelative(ts);
   const date = new Date(ts);
   if (!Number.isFinite(date.getTime())) return "-";
+  if (displayFormat === "short") return formatShortDateParts(date, mode === "utc");
   return formatDateParts(date, mode === "utc");
 }
 
@@ -63,5 +73,17 @@ export function formatRelative(ts) {
   if (secs < 60) return `${secs}s ago`;
   const mins = Math.round(secs / 60);
   if (mins < 60) return `${mins}m ago`;
-  return `${Math.round(mins / 60)}h ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  if (days === 1) return "yesterday";
+  if (days < 7) return `${days}d ago`;
+  const weeks = Math.round(days / 7);
+  if (weeks === 1) return "1 week ago";
+  if (weeks < 5) return `${weeks} weeks ago`;
+  const months = Math.round(days / 30);
+  if (months === 1) return "1 month ago";
+  if (months < 12) return `${months} months ago`;
+  const years = Math.round(days / 365);
+  return years === 1 ? "1 year ago" : `${years} years ago`;
 }

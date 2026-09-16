@@ -1,5 +1,5 @@
 <script setup>
-import { reactive, computed, watch } from "vue";
+import { reactive, ref, computed, nextTick, watch } from "vue";
 import { useMonitorStore } from "../store/monitor";
 import { statusColor, fmtMs, STATUS_TEXT } from "../data/format";
 import { clientInfo, synthRawLine, timingSplits } from "../data/mock";
@@ -9,8 +9,56 @@ import WorldMap from "./WorldMap.vue";
 
 const store = useMonitorStore();
 const collapsed = reactive({});
+const showInspectorSettings = ref(false);
+const inspectorSettingsButton = ref(null);
+const inspectorSettingsAnchor = ref({ right: 12, top: 60 });
+const draggedInspectorSection = ref(null);
+const dragOverInspectorSection = ref(null);
+const inspectorSections = [
+  { id: "logged", label: "Log fields" },
+  { id: "request", label: "Request" },
+  { id: "client", label: "Client" },
+  { id: "timing", label: "Response & timing" },
+  { id: "raw", label: "Raw line" },
+];
+const inspectorSectionById = new Map(inspectorSections.map((section) => [section.id, section]));
 function toggle(id) {
   collapsed[id] = !collapsed[id];
+}
+function hasValue(value) {
+  return value != null && value !== "" && value !== "-" && value !== "—";
+}
+function shouldShow(value) {
+  return store.inspectorShowAllFields || hasValue(value);
+}
+async function toggleInspectorSettings() {
+  if (showInspectorSettings.value) {
+    showInspectorSettings.value = false;
+    return;
+  }
+  const rect = inspectorSettingsButton.value?.getBoundingClientRect();
+  if (rect) inspectorSettingsAnchor.value = { right: window.innerWidth - rect.right, top: rect.bottom + 5 };
+  showInspectorSettings.value = true;
+  await nextTick();
+}
+function sectionOrder(id) {
+  const index = store.inspectorSectionOrder.indexOf(id);
+  return index === -1 ? inspectorSections.length : index;
+}
+function startInspectorSectionDrag(event, id) {
+  draggedInspectorSection.value = id;
+  event.dataTransfer.effectAllowed = "move";
+  event.dataTransfer.setData("text/plain", id);
+}
+function dropInspectorSection(event, id) {
+  const dragged = draggedInspectorSection.value || event.dataTransfer.getData("text/plain");
+  draggedInspectorSection.value = null;
+  dragOverInspectorSection.value = null;
+  if (dragged) store.moveInspectorSection(dragged, id);
+}
+function endInspectorSectionDrag() {
+  draggedInspectorSection.value = null;
+  dragOverInspectorSection.value = null;
 }
 
 const r = computed(() => store.selectedRow);
@@ -109,7 +157,46 @@ watch(
     <div class="insp-search">
       <div class="chip txt"><i class="ph ph-list-dashes"></i>All fields<span class="caret">▾</span></div>
       <div class="filterbar"><i class="ph ph-magnifying-glass"></i><input placeholder="Filter fields…"></div>
-      <i class="ph ph-push-pin" style="color:var(--color-neutral-600)"></i>
+      <div class="inspector-settings-anchor">
+        <button ref="inspectorSettingsButton" class="icon-btn" title="Inspector settings" @click="toggleInspectorSettings"><i class="ph ph-gear-six"></i></button>
+      </div>
+      <Teleport to="body">
+        <div v-if="showInspectorSettings" class="popup-backdrop" @click="showInspectorSettings = false"></div>
+        <div
+          v-if="showInspectorSettings"
+          class="inspector-settings-popover"
+          :style="{ right: inspectorSettingsAnchor.right + 'px', top: inspectorSettingsAnchor.top + 'px' }"
+          @click.stop
+        >
+          <div class="settings-group-label">Inspector</div>
+          <label class="toggle-row">
+            <div>
+              <div>Show all fields</div>
+              <div class="settings-sub">Include empty log fields such as ident and authenticated user.</div>
+            </div>
+            <span class="toggle" :class="{ on: store.inspectorShowAllFields }" @click="store.setInspectorShowAllFields(!store.inspectorShowAllFields)"><span class="knob"></span></span>
+          </label>
+          <div class="inspector-settings-section-head">
+            <span>Section order</span>
+            <button class="btn-plain" @click="store.resetInspectorSections()">Reset</button>
+          </div>
+          <div
+            v-for="sectionId in store.inspectorSectionOrder"
+            :key="sectionId"
+            class="inspector-section-option"
+            :class="{ dragging: draggedInspectorSection === sectionId, 'drag-over': dragOverInspectorSection === sectionId && draggedInspectorSection !== sectionId }"
+            draggable="true"
+            @dragstart="startInspectorSectionDrag($event, sectionId)"
+            @dragover.prevent="dragOverInspectorSection = sectionId"
+            @dragleave="dragOverInspectorSection === sectionId && (dragOverInspectorSection = null)"
+            @drop.prevent="dropInspectorSection($event, sectionId)"
+            @dragend="endInspectorSectionDrag"
+          >
+            <i class="ph ph-dots-six-vertical"></i>
+            <span>{{ inspectorSectionById.get(sectionId)?.label || sectionId }}</span>
+          </div>
+        </div>
+      </Teleport>
     </div>
     <div style="padding:6px;flex:none">
       <button class="insp-filter-btn" @click="filterByEntry"><i class="ph ph-funnel-simple"></i>Filter tail by this entry</button>
@@ -118,115 +205,125 @@ watch(
     <div v-if="!r" class="insp-empty">Select a tail row to inspect it.</div>
 
     <div v-else class="insp-body">
-      <div class="insp-section-hd" @click="toggle('logged')">Log fields</div>
-      <template v-if="!collapsed.logged">
-        <div class="insp-field"><span class="k">Timestamp</span><div class="v" style="white-space:normal;overflow-wrap:anywhere">{{ r.timestamp ?? "-" }}</div></div>
-        <div class="insp-field"><span class="k">Hostname</span><div class="v" style="white-space:normal;overflow-wrap:anywhere">{{ r.hostname ?? "-" }}</div></div>
-        <div class="insp-field"><span class="k">Ident</span><div class="v" style="white-space:normal;overflow-wrap:anywhere">{{ r.ident ?? "-" }}</div></div>
-        <div class="insp-field"><span class="k">Authenticated user</span><div class="v" style="white-space:normal;overflow-wrap:anywhere">{{ r.authUser ?? "-" }}</div></div>
-        <div class="insp-field"><span class="k">X-Forwarded-For</span><div class="v" style="white-space:normal;overflow-wrap:anywhere">{{ r.forwardedFor ?? "-" }}</div></div>
-        <div class="insp-field"><span class="k">Full request</span><div class="v" style="white-space:normal;overflow-wrap:anywhere">{{ r.request ?? "-" }}</div></div>
-        <div class="insp-field"><span class="k">Referer</span><div class="v" style="white-space:normal;overflow-wrap:anywhere">{{ r.referer ?? "-" }}</div></div>
-        <div class="insp-field"><span class="k">Response bytes</span><div class="v" style="white-space:normal;overflow-wrap:anywhere">{{ r.bytes ?? "-" }}</div></div>
-        <div class="insp-field"><span class="k">Source file</span><div class="v" style="white-space:normal;overflow-wrap:anywhere">{{ r.filePath ?? "-" }}</div></div>
-      </template>
-      <div class="insp-section-hd" @click="toggle('request')">
-        <i class="ph" :class="collapsed.request ? 'ph-caret-right' : 'ph-caret-down'"></i>
-        <i class="ph ph-arrow-square-out" style="color:var(--color-accent-400)"></i>Request
-        <i class="ph ph-lock-simple" style="color:var(--color-neutral-700);margin-left:auto"></i>
-      </div>
-      <template v-if="!collapsed.request">
-        <div class="insp-field"><span class="k">Method</span><div class="v" style="color:var(--color-accent-2-300)">{{ r.method }}</div></div>
-        <div class="insp-field"><span class="k">Path</span><div class="v">{{ pathParts[0] }}</div></div>
-        <div class="insp-field"><span class="k">Query</span><div class="v" style="color:var(--color-neutral-400)">{{ pathParts[1] ? "?" + pathParts[1] : "—" }}</div></div>
-        <div class="insp-field"><span class="k">Protocol</span><div class="v" style="color:var(--color-neutral-300)">{{ r.protocol || "-" }}</div></div>
-      </template>
-
-      <div class="insp-section-hd" @click="toggle('client')">
-        <i class="ph" :class="collapsed.client ? 'ph-caret-right' : 'ph-caret-down'"></i>
-        <i class="ph ph-user-focus" style="color:var(--color-accent-400)"></i>Client
-        <i class="ph ph-lock-simple" style="color:var(--color-neutral-700);margin-left:auto"></i>
-      </div>
-      <template v-if="!collapsed.client">
-        <div class="insp-field"><span class="k">Remote IP</span><div class="v">{{ r.ip }}<i class="ph ph-copy" style="margin-left:auto;color:var(--color-neutral-600)"></i></div></div>
-        <div class="insp-field"><span class="k">Reverse DNS</span><div class="v" style="color:var(--color-neutral-400)">{{ rdnsText }}</div></div>
-        <div class="insp-field">
-          <span class="k">Country</span>
-          <div class="v" style="color:var(--color-neutral-300)">
-            <span v-if="geoip?.status === 'ok'"><img v-if="countryFlag" :src="countryFlag" class="country-flag" alt="" aria-hidden="true">{{ geoip.countryName || geoip.countryCode }} <span style="color:var(--color-neutral-600)">({{ geoip.countryCode }})</span></span>
-            <span v-else-if="geoip?.status === 'local'">local/private</span>
-            <span v-else-if="geoip?.status === 'error'" style="color:var(--st4)">{{ geoip.countryName }}</span>
-            <span v-else-if="geoipLoading">downloading GeoIP...</span>
-            <span v-else style="color:var(--color-neutral-600)">not found</span>
-          </div>
-        </div>
-        <div class="insp-field"><span class="k">City</span><div class="v" style="color:var(--color-neutral-300)">{{ cityText || "—" }}</div></div>
-        <div class="insp-field"><span class="k">Coordinate</span><div class="v" style="color:var(--color-neutral-600)">{{ coordsText || "—" }}</div></div>
-        <div class="insp-field"><span class="k">ASN / Net</span><div class="v" style="color:var(--color-neutral-300)">{{ asnText || "—" }}</div></div>
-        <WorldMap :lat="details?.lat ?? null" :lon="details?.lon ?? null" :label="cityText || ''" />
-        <div class="insp-field" style="align-items:start">
-          <span class="k" style="padding-top:3px">User agent</span>
-          <div class="v" style="white-space:normal;height:auto;padding:3px 6px;align-items:flex-start;color:var(--color-neutral-400)">{{ r.userAgent || info.ua }}</div>
-        </div>
-        <div class="insp-field">
-          <span class="k">Classified</span>
-          <div class="insp-tags">
-            <span v-for="t in classification" :key="t.id" class="insp-tag" :class="t.severity === 'high' ? 'sev-high' : 'sev-warn'" :title="t.label">{{ t.label }}</span>
-            <span v-if="isBot" class="insp-tag sev-info">bot · likely</span>
-            <span v-if="!classification.length && !isBot" class="insp-tag sev-none">normal request</span>
-          </div>
-        </div>
-      </template>
-
-      <div class="insp-section-hd" @click="toggle('timing')">
-        <i class="ph" :class="collapsed.timing ? 'ph-caret-right' : 'ph-caret-down'"></i>
-        <i class="ph ph-gauge" style="color:var(--color-accent-400)"></i>Response &amp; timing
-      </div>
-      <template v-if="!collapsed.timing">
-        <div class="insp-field">
-          <span class="k">Status</span>
-          <div class="insp-status-row">
-            <div
-              class="insp-status-code"
-              :style="{
-                background: isDanger ? undefined : 'var(--chrome-bg)',
-                borderColor: isDanger ? undefined : 'var(--chrome-border-2)',
-                color: statusColor(r.status),
-              }"
-            >{{ r.status }}</div>
-            <div class="insp-status-text">{{ STATUS_TEXT[r.status] || "" }}</div>
-          </div>
-        </div>
-        <div class="insp-field">
-          <span class="k">Timing µs</span>
-          <div v-if="r.ms != null" class="timing-triple">
-            <div class="timing-chip"><span class="k">T</span><span :style="{ color: statusColor(r.status) }">{{ fmtMs(r.ms) }}</span></div>
-            <div class="timing-chip"><span class="k">U</span><span style="color:var(--color-neutral-300)">{{ fmtMs(r.ms * 0.97) }}</span></div>
-            <div class="timing-chip"><span class="k">B</span><span style="color:var(--color-neutral-300)">{{ Math.round(r.ms * 0.03) }}ms</span></div>
-          </div>
-          <div v-else class="v" style="color:var(--color-neutral-600)">Not available — this log format doesn't record response time</div>
-        </div>
-        <div v-if="r.ms != null" class="timing-bar-wrap">
-          <div class="timing-bar">
-            <div :style="{ width: splits[0] + '%', background: 'var(--color-accent-600)' }"></div>
-            <div :style="{ width: splits[1] + '%', background: 'var(--color-accent-400)' }"></div>
-            <div :style="{ width: splits[2] + '%', background: isDanger ? 'var(--st5)' : 'var(--color-accent-500)' }"></div>
-            <div :style="{ width: splits[3] + '%', background: 'var(--color-neutral-600)' }"></div>
-          </div>
-          <div class="timing-bar-labels"><span>tls</span><span>proxy</span><span>upstream wait</span><span>write</span></div>
-        </div>
-      </template>
-
-      <div class="insp-section-hd" @click="toggle('raw')">
-        <i class="ph" :class="collapsed.raw ? 'ph-caret-right' : 'ph-caret-down'"></i>
-        <i class="ph ph-code" style="color:var(--color-accent-400)"></i>Raw line
-        <i class="ph ph-copy" style="color:var(--color-neutral-600);margin-left:auto"></i>
-      </div>
-      <div v-if="!collapsed.raw" class="raw-line">
-        <template v-for="(part, i) in rawLineParts" :key="i">
-          <span v-if="part.highlight" :style="{ color: statusColor(r.status) }">{{ part.text }}</span>
-          <template v-else>{{ part.text }}</template>
+      <div class="inspector-section-block" :style="{ order: sectionOrder('logged') }">
+        <div class="insp-section-hd" @click="toggle('logged')">Log fields</div>
+        <template v-if="!collapsed.logged">
+          <div v-if="shouldShow(r.timestamp)" class="insp-field"><span class="k">Timestamp</span><div class="v" style="white-space:normal;overflow-wrap:anywhere">{{ hasValue(r.timestamp) ? r.timestamp : "-" }}</div></div>
+          <div v-if="shouldShow(r.hostname)" class="insp-field"><span class="k">Hostname</span><div class="v" style="white-space:normal;overflow-wrap:anywhere">{{ hasValue(r.hostname) ? r.hostname : "-" }}</div></div>
+          <div v-if="shouldShow(r.ident)" class="insp-field"><span class="k">Ident</span><div class="v" style="white-space:normal;overflow-wrap:anywhere">{{ hasValue(r.ident) ? r.ident : "-" }}</div></div>
+          <div v-if="shouldShow(r.authUser)" class="insp-field"><span class="k">Authenticated user</span><div class="v" style="white-space:normal;overflow-wrap:anywhere">{{ hasValue(r.authUser) ? r.authUser : "-" }}</div></div>
+          <div v-if="shouldShow(r.forwardedFor)" class="insp-field"><span class="k">X-Forwarded-For</span><div class="v" style="white-space:normal;overflow-wrap:anywhere">{{ hasValue(r.forwardedFor) ? r.forwardedFor : "-" }}</div></div>
+          <div v-if="shouldShow(r.request)" class="insp-field"><span class="k">Full request</span><div class="v" style="white-space:normal;overflow-wrap:anywhere">{{ hasValue(r.request) ? r.request : "-" }}</div></div>
+          <div v-if="shouldShow(r.referer)" class="insp-field"><span class="k">Referer</span><div class="v" style="white-space:normal;overflow-wrap:anywhere">{{ hasValue(r.referer) ? r.referer : "-" }}</div></div>
+          <div v-if="shouldShow(r.bytes)" class="insp-field"><span class="k">Response bytes</span><div class="v" style="white-space:normal;overflow-wrap:anywhere">{{ hasValue(r.bytes) ? r.bytes : "-" }}</div></div>
+          <div v-if="shouldShow(r.filePath)" class="insp-field"><span class="k">Source file</span><div class="v" style="white-space:normal;overflow-wrap:anywhere">{{ hasValue(r.filePath) ? r.filePath : "-" }}</div></div>
         </template>
+      </div>
+      <div class="inspector-section-block" :style="{ order: sectionOrder('request') }">
+        <div class="insp-section-hd" @click="toggle('request')">
+          <i class="ph" :class="collapsed.request ? 'ph-caret-right' : 'ph-caret-down'"></i>
+          <i class="ph ph-arrow-square-out" style="color:var(--color-accent-400)"></i>Request
+          <i class="ph ph-lock-simple" style="color:var(--color-neutral-700);margin-left:auto"></i>
+        </div>
+        <template v-if="!collapsed.request">
+          <div class="insp-field"><span class="k">Method</span><div class="v" style="color:var(--color-accent-2-300)">{{ r.method }}</div></div>
+          <div class="insp-field"><span class="k">Path</span><div class="v">{{ pathParts[0] }}</div></div>
+          <div v-if="store.inspectorShowAllFields || pathParts[1]" class="insp-field"><span class="k">Query</span><div class="v" style="color:var(--color-neutral-400)">{{ pathParts[1] ? "?" + pathParts[1] : "-" }}</div></div>
+          <div v-if="shouldShow(r.protocol)" class="insp-field"><span class="k">Protocol</span><div class="v" style="color:var(--color-neutral-300)">{{ hasValue(r.protocol) ? r.protocol : "-" }}</div></div>
+        </template>
+      </div>
+
+      <div class="inspector-section-block" :style="{ order: sectionOrder('client') }">
+        <div class="insp-section-hd" @click="toggle('client')">
+          <i class="ph" :class="collapsed.client ? 'ph-caret-right' : 'ph-caret-down'"></i>
+          <i class="ph ph-user-focus" style="color:var(--color-accent-400)"></i>Client
+          <i class="ph ph-lock-simple" style="color:var(--color-neutral-700);margin-left:auto"></i>
+        </div>
+        <template v-if="!collapsed.client">
+          <div class="insp-field"><span class="k">Remote IP</span><div class="v">{{ r.ip }}<i class="ph ph-copy" style="margin-left:auto;color:var(--color-neutral-600)"></i></div></div>
+          <div class="insp-field"><span class="k">Reverse DNS</span><div class="v" style="color:var(--color-neutral-400)">{{ rdnsText }}</div></div>
+          <div class="insp-field">
+            <span class="k">Country</span>
+            <div class="v" style="color:var(--color-neutral-300)">
+              <span v-if="geoip?.status === 'ok'"><img v-if="countryFlag" :src="countryFlag" class="country-flag" alt="" aria-hidden="true">{{ geoip.countryName || geoip.countryCode }} <span style="color:var(--color-neutral-600)">({{ geoip.countryCode }})</span></span>
+              <span v-else-if="geoip?.status === 'local'">local/private</span>
+              <span v-else-if="geoip?.status === 'error'" style="color:var(--st4)">{{ geoip.countryName }}</span>
+              <span v-else-if="geoipLoading">downloading GeoIP...</span>
+              <span v-else style="color:var(--color-neutral-600)">not found</span>
+            </div>
+          </div>
+          <div v-if="shouldShow(cityText)" class="insp-field"><span class="k">City</span><div class="v" style="color:var(--color-neutral-300)">{{ cityText || "-" }}</div></div>
+          <div v-if="shouldShow(coordsText)" class="insp-field"><span class="k">Coordinate</span><div class="v" style="color:var(--color-neutral-600)">{{ coordsText || "-" }}</div></div>
+          <div v-if="shouldShow(asnText)" class="insp-field"><span class="k">ASN / Net</span><div class="v" style="color:var(--color-neutral-300)">{{ asnText || "-" }}</div></div>
+          <WorldMap :lat="details?.lat ?? null" :lon="details?.lon ?? null" :label="cityText || ''" />
+          <div class="insp-field" style="align-items:start">
+            <span class="k" style="padding-top:3px">User agent</span>
+            <div class="v" style="white-space:normal;height:auto;padding:3px 6px;align-items:flex-start;color:var(--color-neutral-400)">{{ r.userAgent || info.ua }}</div>
+          </div>
+          <div class="insp-field">
+            <span class="k">Classified</span>
+            <div class="insp-tags">
+              <span v-for="t in classification" :key="t.id" class="insp-tag" :class="t.severity === 'high' ? 'sev-high' : 'sev-warn'" :title="t.label">{{ t.label }}</span>
+              <span v-if="isBot" class="insp-tag sev-info">bot · likely</span>
+              <span v-if="!classification.length && !isBot" class="insp-tag sev-none">normal request</span>
+            </div>
+          </div>
+        </template>
+      </div>
+
+      <div class="inspector-section-block" :style="{ order: sectionOrder('timing') }">
+        <div class="insp-section-hd" @click="toggle('timing')">
+          <i class="ph" :class="collapsed.timing ? 'ph-caret-right' : 'ph-caret-down'"></i>
+          <i class="ph ph-gauge" style="color:var(--color-accent-400)"></i>Response &amp; timing
+        </div>
+        <template v-if="!collapsed.timing">
+          <div class="insp-field">
+            <span class="k">Status</span>
+            <div class="insp-status-row">
+              <div
+                class="insp-status-code"
+                :style="{
+                  background: isDanger ? undefined : 'var(--chrome-bg)',
+                  borderColor: isDanger ? undefined : 'var(--chrome-border-2)',
+                  color: statusColor(r.status),
+                }"
+              >{{ r.status }}</div>
+              <div class="insp-status-text">{{ STATUS_TEXT[r.status] || "" }}</div>
+            </div>
+          </div>
+          <div class="insp-field">
+            <span class="k">Timing µs</span>
+            <div v-if="r.ms != null" class="timing-triple">
+              <div class="timing-chip"><span class="k">T</span><span :style="{ color: statusColor(r.status) }">{{ fmtMs(r.ms) }}</span></div>
+              <div class="timing-chip"><span class="k">U</span><span style="color:var(--color-neutral-300)">{{ fmtMs(r.ms * 0.97) }}</span></div>
+              <div class="timing-chip"><span class="k">B</span><span style="color:var(--color-neutral-300)">{{ Math.round(r.ms * 0.03) }}ms</span></div>
+            </div>
+            <div v-else class="v" style="color:var(--color-neutral-600)">Not available — this log format doesn't record response time</div>
+          </div>
+          <div v-if="r.ms != null" class="timing-bar-wrap">
+            <div class="timing-bar">
+              <div :style="{ width: splits[0] + '%', background: 'var(--color-accent-600)' }"></div>
+              <div :style="{ width: splits[1] + '%', background: 'var(--color-accent-400)' }"></div>
+              <div :style="{ width: splits[2] + '%', background: isDanger ? 'var(--st5)' : 'var(--color-accent-500)' }"></div>
+              <div :style="{ width: splits[3] + '%', background: 'var(--color-neutral-600)' }"></div>
+            </div>
+            <div class="timing-bar-labels"><span>tls</span><span>proxy</span><span>upstream wait</span><span>write</span></div>
+          </div>
+        </template>
+      </div>
+
+      <div class="inspector-section-block" :style="{ order: sectionOrder('raw') }">
+        <div class="insp-section-hd" @click="toggle('raw')">
+          <i class="ph" :class="collapsed.raw ? 'ph-caret-right' : 'ph-caret-down'"></i>
+          <i class="ph ph-code" style="color:var(--color-accent-400)"></i>Raw line
+          <i class="ph ph-copy" style="color:var(--color-neutral-600);margin-left:auto"></i>
+        </div>
+        <div v-if="!collapsed.raw" class="raw-line">
+          <template v-for="(part, i) in rawLineParts" :key="i">
+            <span v-if="part.highlight" :style="{ color: statusColor(r.status) }">{{ part.text }}</span>
+            <template v-else>{{ part.text }}</template>
+          </template>
+        </div>
       </div>
     </div>
   </div>

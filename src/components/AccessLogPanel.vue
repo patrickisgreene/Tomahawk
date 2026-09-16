@@ -5,6 +5,11 @@ import { statusColor, fmtMs, fmtBytes, formatTimestamp } from "../data/format";
 import AppSelect from "./AppSelect.vue";
 
 const store = useMonitorStore();
+const relativeClock = ref(Date.now());
+const draggedColumn = ref(null);
+const dragOverColumn = ref(null);
+const columnMenuOpen = ref(false);
+let relativeTimer;
 const domains = computed(() => {
   const values = store.tailRows
     .filter((row) => !store.tailSourceId || row.id.startsWith(store.tailSourceId + ":"))
@@ -49,9 +54,12 @@ const columns = [
   ["authUser", "Authenticated user", 150], ["request", "Full request", 340],
   ["filePath", "Source file", 300], ["ms", "Duration", 90],
 ];
-const selectedColumns = ref(["timestamp", "ip", "hostname", "method", "status", "path", "bytes", "protocol"]);
-const visibleColumns = computed(() => columns.filter(([key]) => selectedColumns.value.includes(key)));
+const columnByKey = new Map(columns.map((column) => [column[0], column]));
+const orderedColumns = computed(() => store.accessColumnLayout.order.map((key) => columnByKey.get(key)).filter(Boolean));
+const visibleColumns = computed(() => store.accessColumnLayout.visible.map((key) => columnByKey.get(key)).filter(Boolean));
 const timestampLabel = computed(() => {
+  if (store.timeDisplayFormat === "relative") return "Timestamp (relative)";
+  if (store.timeDisplayFormat === "source") return "Timestamp (source)";
   if (store.displayTimezone === "utc") return "Timestamp (UTC)";
   if (store.displayTimezone === "source") return "Timestamp (source)";
   return "Timestamp (local)";
@@ -62,14 +70,40 @@ const gridStyle = computed(() => ({
 function valueFor(row, key) {
   if (key === "bytes") return fmtBytes(row.bytes);
   if (key === "ms") return fmtMs(row.ms);
-  if (key === "timestamp") return formatTimestamp(row, store.displayTimezone);
+  if (key === "timestamp") {
+    if (store.timeDisplayFormat === "relative") relativeClock.value;
+    return formatTimestamp(row, store.displayTimezone, store.timeDisplayFormat);
+  }
   return row[key] || "-";
+}
+function titleFor(row, key) {
+  if (key === "timestamp") return formatTimestamp(row, store.displayTimezone, "full");
+  return String(row[key] ?? "");
+}
+function startColumnDrag(event, key) {
+  draggedColumn.value = key;
+  event.dataTransfer.effectAllowed = "move";
+  event.dataTransfer.setData("text/plain", key);
+}
+function dropColumn(event, key) {
+  const dragged = draggedColumn.value || event.dataTransfer.getData("text/plain");
+  draggedColumn.value = null;
+  dragOverColumn.value = null;
+  if (dragged) store.moveAccessColumn(dragged, key);
+}
+function endColumnDrag() {
+  draggedColumn.value = null;
+  dragOverColumn.value = null;
 }
 onMounted(async () => {
   await store.hydrateTailRows();
   store.startAutoResync();
+  relativeTimer = setInterval(() => { relativeClock.value = Date.now(); }, 30000);
 });
-onUnmounted(() => store.stopAutoResync());
+onUnmounted(() => {
+  store.stopAutoResync();
+  clearInterval(relativeTimer);
+});
 </script>
 
 <template>
@@ -87,23 +121,58 @@ onUnmounted(() => store.stopAutoResync());
         <input :value="store.tailFilterText" @input="store.setTailFilter($event.target.value)" aria-label="Search loaded log fields" placeholder="Search all log fields...">
         <button v-if="store.tailFilterText" class="icon-btn" aria-label="Clear search" @click="store.setTailFilter('')"><i class="ph ph-x"></i></button>
       </div>
-      <details class="column-picker">
-        <summary class="chip">Columns</summary>
-        <div class="column-options">
-          <label v-for="[key, label] in columns" :key="key">
-            <input type="checkbox" :value="key" v-model="selectedColumns" :disabled="selectedColumns.length === 1 && selectedColumns.includes(key)">{{ label }}
-          </label>
+      <div class="column-picker" :class="{ open: columnMenuOpen }">
+        <div v-if="columnMenuOpen" class="popup-backdrop" @click="columnMenuOpen = false"></div>
+        <button class="chip" @click="columnMenuOpen = !columnMenuOpen">Columns</button>
+        <div v-if="columnMenuOpen" class="column-options" @click.stop>
+          <div class="column-options-head">
+            <span>Columns for this tab</span>
+            <button class="btn-plain" @click="store.resetAccessColumns()">Reset</button>
+          </div>
+          <div
+            v-for="[key, label] in orderedColumns"
+            :key="key"
+            class="column-option-row"
+            :class="{ dragging: draggedColumn === key, 'drag-over': dragOverColumn === key && draggedColumn !== key }"
+            draggable="true"
+            @dragstart="startColumnDrag($event, key)"
+            @dragover.prevent="dragOverColumn = key"
+            @dragleave="dragOverColumn === key && (dragOverColumn = null)"
+            @drop.prevent="dropColumn($event, key)"
+            @dragend="endColumnDrag"
+          >
+            <i class="ph ph-dots-six-vertical column-drag-handle" title="Drag to reorder"></i>
+            <label>
+              <input
+                type="checkbox"
+                :checked="store.accessColumnLayout.visible.includes(key)"
+                :disabled="store.accessColumnLayout.visible.length === 1 && store.accessColumnLayout.visible.includes(key)"
+                @change="store.setAccessColumnVisible(key, $event.target.checked)"
+              >{{ label }}
+            </label>
+          </div>
         </div>
-      </details>
+      </div>
     </div>
     <div v-if="store.syncProgress" class="sync-progress-bar"><div :style="{ width: store.syncProgress.completed / store.syncProgress.total * 100 + '%' }"></div></div>
     <div v-if="store.syncError" role="alert" class="access-message">{{ store.syncError }}</div>
     <div class="access-scroll">
       <div class="access-table">
         <div class="tail-head" :style="gridStyle">
-          <span v-for="[key, label] in visibleColumns" :key="key">
+          <span
+            v-for="[key, label] in visibleColumns"
+            :key="key"
+            class="tail-head-cell"
+            :class="{ dragging: draggedColumn === key, 'drag-over': dragOverColumn === key && draggedColumn !== key }"
+            draggable="true"
+            @dragstart="startColumnDrag($event, key)"
+            @dragover.prevent="dragOverColumn = key"
+            @dragleave="dragOverColumn === key && (dragOverColumn = null)"
+            @drop.prevent="dropColumn($event, key)"
+            @dragend="endColumnDrag"
+          >
             <button v-if="key === 'timestamp'" class="time-sort" @click="store.toggleSort()">{{ timestampLabel }}<i class="ph" :class="store.tailSortDesc ? 'ph-caret-down' : 'ph-caret-up'"></i></button>
-            <template v-else>{{ label }}</template>
+            <template v-else><i class="ph ph-dots-six-vertical tail-head-drag"></i>{{ label }}</template>
           </span>
         </div>
         <template v-if="loading">
@@ -111,7 +180,7 @@ onUnmounted(() => store.stopAutoResync());
         </template>
         <template v-else>
           <div v-for="row in store.filteredTailRows" :key="row.id" class="tail-row" :style="gridStyle" :class="{ selected: row.id === store.selectedRowId, 'is-error': row.status >= 500 }" @click="store.selectRow(row.id)">
-            <span v-for="[key] in visibleColumns" :key="key" :title="String(row[key] ?? '')" :style="key === 'status' ? { color: statusColor(row.status) } : {}">{{ valueFor(row, key) }}</span>
+            <span v-for="[key] in visibleColumns" :key="key" :title="titleFor(row, key)" :style="key === 'status' ? { color: statusColor(row.status) } : {}">{{ valueFor(row, key) }}</span>
           </div>
         </template>
       </div>

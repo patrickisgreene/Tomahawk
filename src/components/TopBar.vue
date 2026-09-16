@@ -9,13 +9,22 @@ import { classifyRequest } from "../data/classification";
 
 const store = useMonitorStore();
 const syncedAgo = useRelativeTime(() => store.lastSyncedAt);
+const resyncOpen = ref(false);
 const securityWarningCount = computed(() => store.tailRows.reduce((count, row) => count + classifyRequest(row, store.localRules).length, 0));
 const securityHighCount = computed(() => store.tailRows.reduce((count, row) => count + classifyRequest(row, store.localRules).filter((tag) => tag.severity === "high").length, 0));
 // Kept as a single UI flag so the updater can populate it once an update
 // endpoint/signing configuration is provided.
 const updateAvailable = ref(false);
-const intervals = [[10000, "Every 10 seconds"], [30000, "Every 30 seconds"], [60000, "Every minute"], [300000, "Every 5 minutes"]];
-const intervalLabel = computed(() => store.resyncIntervalMs < 60000 ? store.resyncIntervalMs / 1000 + "s" : store.resyncIntervalMs / 60000 + "m");
+const intervals = [
+  [1800000, "Every 30 minutes"],
+  [3600000, "Every hour"],
+  [21600000, "Every 6 hours"],
+  [43200000, "Every 12 hours"],
+];
+const intervalLabel = computed(() => {
+  if (store.resyncIntervalMs < 3600000) return store.resyncIntervalMs / 60000 + "m";
+  return store.resyncIntervalMs / 3600000 + "h";
+});
 
 const appWindow = getCurrentWindow();
 const isMaximized = ref(false);
@@ -45,6 +54,11 @@ function closeWindow() {
 function newWorkspace() { store.createWorkspace(); }
 function rename(item) { const name = window.prompt("Workspace name", item.name); if (name) store.renameWorkspace(item.id, name); }
 function openSecurityAlerts() { store.panelVisibility.bottom = true; store.dockActiveTab.bottom = "alerts"; }
+function closeResyncMenu() { resyncOpen.value = false; }
+function setResyncInterval(value) {
+  store.setResyncInterval(value);
+  closeResyncMenu();
+}
 
 const PANEL_TOGGLES = [
   { side: "left", close: PanelLeftClose, open: PanelLeftOpen },
@@ -78,18 +92,19 @@ if (store.workspaces.length && store.workspaces[0].id === "monitor" && store.wor
       </button>
       <button class="icon-btn" title="Settings" @click="store.openSettingsDialog()"><i class="ph ph-gear-six"></i></button>
     </div>
-    <details class="resync-picker header-resync">
-      <summary class="tail-state" title="Resync settings">
+    <div class="resync-picker header-resync" :class="{ open: resyncOpen }">
+      <div v-if="resyncOpen" class="popup-backdrop" @click="closeResyncMenu"></div>
+      <button class="tail-state" title="Resync settings" @click="resyncOpen = !resyncOpen">
       <i class="ph" :class="store.isSyncing ? 'ph-spinner spin' : 'ph-arrows-clockwise'"></i>
       <span>{{ store.isSyncing ? "Syncing" : "Resync" }}</span>
       <span class="tail-interval">{{ intervalLabel }}</span>
       <span class="caret">▾</span>
-      </summary>
-      <div class="resync-options">
-        <button class="chip accent" :disabled="store.isSyncing" @click="store.resyncNow()">Resync now</button>
-        <fieldset><legend>Automatic resync</legend><label v-for="[value, label] in intervals" :key="value"><input type="radio" name="header-resync-interval" :value="value" :checked="store.resyncIntervalMs === value" @change="store.setResyncInterval(value)">{{ label }}</label></fieldset>
+      </button>
+      <div v-if="resyncOpen" class="resync-options" @click.stop>
+        <button class="chip accent" :disabled="store.isSyncing" @click="store.resyncNow(); closeResyncMenu()">Resync now</button>
+        <fieldset><legend>Automatic resync</legend><label v-for="[value, label] in intervals" :key="value"><input type="radio" name="header-resync-interval" :value="value" :checked="store.resyncIntervalMs === value" @change="setResyncInterval(value)">{{ label }}</label></fieldset>
       </div>
-    </details>
+    </div>
     <span class="header-sync-age">{{ store.isSyncing ? "syncing now" : "synced " + syncedAgo }}</span>
     <div class="topbar-nav">
       <button class="icon-btn" title="Search everything" @click="store.openGlobalSearch()"><i class="ph ph-magnifying-glass"></i></button>

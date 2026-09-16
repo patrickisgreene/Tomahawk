@@ -9,7 +9,7 @@ const columns = computed(() => [
   "minmax(0, 1fr)",
   ...(store.panelVisibility.right ? ["5px", `${store.panelSizes.right}px`] : []),
 ].join(" "));
-watch(() => [store.dockTabs, store.dockActiveTab, store.panelVisibility], () => store.saveWorkspaceState(), { deep: true });
+watch(() => [store.dockTabs, store.dockActiveTab, store.panelVisibility, store.accessColumnLayout], () => store.saveWorkspaceState(), { deep: true });
 </script>
 
 <template>
@@ -41,9 +41,7 @@ watch(() => [store.dockTabs, store.dockActiveTab, store.panelVisibility], () => 
         <Splitter class="bottom-mix-splitter" axis="width" target="mix" invert />
         <Dock class="bottom-status-dock" dock-id="mix">
           <template #trailing>
-            <div style="margin-left:auto;display:flex;gap:6px;color:var(--color-neutral-600);font-size:11px">
-              <i class="ph ph-arrows-out-line-horizontal"></i><i class="ph ph-pause"></i>
-            </div>
+            <div style="margin-left:auto;display:flex;gap:6px;color:var(--color-neutral-600);font-size:11px"></div>
           </template>
         </Dock>
       </div>

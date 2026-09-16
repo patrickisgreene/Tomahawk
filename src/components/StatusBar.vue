@@ -8,7 +8,10 @@ const syncedAgo = useRelativeTime(() => store.lastSyncedAt);
 const sourceFileCount = computed(() => store.sources.reduce((total, source) => total + (source.files?.length || 0), 0));
 const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "Local time";
 const syncLabel = computed(() => store.isSyncing ? "Syncing" : "Synced");
-const intervalLabel = computed(() => store.resyncIntervalMs < 60000 ? `${store.resyncIntervalMs / 1000}s` : `${store.resyncIntervalMs / 60000}m`);
+const intervalLabel = computed(() => {
+  if (store.resyncIntervalMs < 3600000) return `${store.resyncIntervalMs / 60000}m`;
+  return `${store.resyncIntervalMs / 3600000}h`;
+});
 </script>
 
 <template>

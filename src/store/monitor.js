@@ -51,7 +51,10 @@ function normalizeLocalRules(value) {
 function persistedSettings(store) {
   return {
     displayTimezone: store.displayTimezone,
+    timeDisplayFormat: store.timeDisplayFormat,
     defaultLogFormat: store.defaultLogFormat,
+    inspectorShowAllFields: store.inspectorShowAllFields,
+    inspectorSectionOrder: store.inspectorSectionOrder,
     localRules: store.localRules,
   };
 }
@@ -69,6 +72,12 @@ const PANEL_SIZE_LIMITS = {
   throughput: { min: 84, max: 420 },
   talkers: { min: 84, max: 420 },
 };
+const DEFAULT_ACCESS_COLUMN_ORDER = [
+  "timestamp", "ip", "hostname", "method", "status", "path", "bytes", "protocol",
+  "referer", "userAgent", "forwardedFor", "ident", "authUser", "request", "filePath", "ms",
+];
+const DEFAULT_ACCESS_VISIBLE_COLUMNS = ["timestamp", "ip", "hostname", "method", "status", "path", "bytes", "protocol"];
+const DEFAULT_INSPECTOR_SECTION_ORDER = ["logged", "request", "client", "timing", "raw"];
 const QUERY_FIELDS = [
   { id: "time", label: "time", type: "text" },
   { id: "ts", label: "ts", type: "number" },
@@ -89,6 +98,25 @@ const QUERY_FIELDS = [
   { id: "protocol", label: "protocol", type: "text" },
   { id: "raw", label: "raw", type: "text" },
 ];
+
+function normalizeAccessColumnLayout(layout) {
+  const inputOrder = Array.isArray(layout?.order) ? layout.order : DEFAULT_ACCESS_COLUMN_ORDER;
+  const order = [
+    ...inputOrder.filter((key) => DEFAULT_ACCESS_COLUMN_ORDER.includes(key)),
+    ...DEFAULT_ACCESS_COLUMN_ORDER.filter((key) => !inputOrder.includes(key)),
+  ];
+  const inputVisible = Array.isArray(layout?.visible) ? layout.visible : DEFAULT_ACCESS_VISIBLE_COLUMNS;
+  const visible = inputVisible.filter((key) => order.includes(key));
+  return { order, visible: visible.length ? visible : [order[0]] };
+}
+
+function normalizeInspectorSectionOrder(order) {
+  const input = Array.isArray(order) ? order : DEFAULT_INSPECTOR_SECTION_ORDER;
+  return [
+    ...input.filter((id) => DEFAULT_INSPECTOR_SECTION_ORDER.includes(id)),
+    ...DEFAULT_INSPECTOR_SECTION_ORDER.filter((id) => !input.includes(id)),
+  ];
+}
 const QUERY_OPERATORS = [
   { id: "contains", label: "contains", types: ["text"] },
   { id: "matches", label: "matches", types: ["text"] },
@@ -202,7 +230,8 @@ export const useMonitorStore = defineStore("monitor", {
     tailWindowMs: 0,
     tailMinStatus: 0,
     tailSortDesc: true, // newest first, matches the design's default caret
-    resyncIntervalMs: 30000,
+    accessColumnLayout: normalizeAccessColumnLayout(),
+    resyncIntervalMs: 1800000,
     lastSyncedAt: Date.now(),
     syncError: null,
     isSyncing: false,
@@ -286,7 +315,10 @@ export const useMonitorStore = defineStore("monitor", {
     showSettingsDialog: false,
     settingsSection: "general",
     displayTimezone: INITIAL_SETTINGS.displayTimezone || "local", // local | utc | source
+    timeDisplayFormat: INITIAL_SETTINGS.timeDisplayFormat || "full", // full | short | relative | source
     defaultLogFormat: INITIAL_SETTINGS.defaultLogFormat || "apache_combined",
+    inspectorShowAllFields: INITIAL_SETTINGS.inspectorShowAllFields === true,
+    inspectorSectionOrder: normalizeInspectorSectionOrder(INITIAL_SETTINGS.inspectorSectionOrder),
     localRules: normalizeLocalRules(INITIAL_SETTINGS.localRules || DEFAULT_LOCAL_RULES),
 
     // ---- file menu dropdown (t5a) ----
@@ -486,7 +518,11 @@ export const useMonitorStore = defineStore("monitor", {
       this.tailSortDesc = !this.tailSortDesc;
     },
     workspaceSnapshot() {
-      return { dockTabs: JSON.parse(JSON.stringify(this.dockTabs)), dockActiveTab: JSON.parse(JSON.stringify(this.dockActiveTab)) };
+      return {
+        dockTabs: JSON.parse(JSON.stringify(this.dockTabs)),
+        dockActiveTab: JSON.parse(JSON.stringify(this.dockActiveTab)),
+        accessColumnLayout: JSON.parse(JSON.stringify(this.accessColumnLayout)),
+      };
     },
     saveWorkspaceState() {
       const current = this.workspaces.find((w) => w.id === this.activeWorkspaceId);
@@ -511,6 +547,7 @@ export const useMonitorStore = defineStore("monitor", {
       this.activeWorkspaceId = id;
       if (workspace.dockTabs) this.dockTabs = JSON.parse(JSON.stringify(workspace.dockTabs));
       if (workspace.dockActiveTab) this.dockActiveTab = JSON.parse(JSON.stringify(workspace.dockActiveTab));
+      this.accessColumnLayout = normalizeAccessColumnLayout(workspace.accessColumnLayout);
       saveWorkspaces(this.workspaces);
     },
     renameWorkspace(id, name) {
@@ -548,6 +585,31 @@ togglePanel(side) {
       if (![400, 1000, 5000].includes(limit)) return;
       this.tailLimit = limit;
       await this.hydrateTailRows();
+    },
+    setAccessColumnVisible(key, visible) {
+      if (!this.accessColumnLayout.order.includes(key)) return;
+      const next = new Set(this.accessColumnLayout.visible);
+      if (visible) next.add(key);
+      else if (next.size > 1) next.delete(key);
+      this.accessColumnLayout.visible = this.accessColumnLayout.order.filter((column) => next.has(column));
+      this.saveWorkspaceState();
+    },
+    moveAccessColumn(key, targetKey) {
+      if (key === targetKey) return;
+      const index = this.accessColumnLayout.order.indexOf(key);
+      const targetIndex = this.accessColumnLayout.order.indexOf(targetKey);
+      if (index === -1 || targetIndex === -1) return;
+      const order = [...this.accessColumnLayout.order];
+      const [column] = order.splice(index, 1);
+      order.splice(targetIndex, 0, column);
+      const visibleSet = new Set(this.accessColumnLayout.visible);
+      this.accessColumnLayout.order = order;
+      this.accessColumnLayout.visible = order.filter((column) => visibleSet.has(column));
+      this.saveWorkspaceState();
+    },
+    resetAccessColumns() {
+      this.accessColumnLayout = normalizeAccessColumnLayout();
+      this.saveWorkspaceState();
     },
     _ensureSource() {
       if (!this._source) this._source = createLogSource();
@@ -897,8 +959,31 @@ togglePanel(side) {
       this.displayTimezone = mode;
       saveSettings(persistedSettings(this));
     },
+    setTimeDisplayFormat(format) {
+      this.timeDisplayFormat = format;
+      saveSettings(persistedSettings(this));
+    },
     setDefaultLogFormat(format) {
       this.defaultLogFormat = format;
+      saveSettings(persistedSettings(this));
+    },
+    setInspectorShowAllFields(enabled) {
+      this.inspectorShowAllFields = !!enabled;
+      saveSettings(persistedSettings(this));
+    },
+    moveInspectorSection(sectionId, targetSectionId) {
+      if (sectionId === targetSectionId) return;
+      const order = normalizeInspectorSectionOrder(this.inspectorSectionOrder);
+      const index = order.indexOf(sectionId);
+      const targetIndex = order.indexOf(targetSectionId);
+      if (index === -1 || targetIndex === -1) return;
+      const [section] = order.splice(index, 1);
+      order.splice(targetIndex, 0, section);
+      this.inspectorSectionOrder = order;
+      saveSettings(persistedSettings(this));
+    },
+    resetInspectorSections() {
+      this.inspectorSectionOrder = normalizeInspectorSectionOrder();
       saveSettings(persistedSettings(this));
     },
     persistSettings() {

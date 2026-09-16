@@ -14,6 +14,7 @@ const panelCount = computed(() => store.panelCatalog.reduce((n, g) => n + g.item
 </script>
 
 <template>
+  <div class="popup-backdrop" @click="store.closePanelPicker()"></div>
   <div class="popover panel-picker" :style="style" @click.stop>
     <div class="popover-search">
       <i class="ph ph-magnifying-glass"></i>

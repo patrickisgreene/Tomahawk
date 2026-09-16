@@ -14,6 +14,12 @@ const TIMEZONES = [
   { id: "utc", label: "UTC" },
   { id: "source", label: "Source" },
 ];
+const TIME_FORMATS = [
+  { value: "full", label: "2026-09-16 14:05:09" },
+  { value: "short", label: "09/16 14:05" },
+  { value: "relative", label: "5m ago" },
+  { value: "source", label: "Source timestamp" },
+];
 const LOG_FORMATS = [
   { value: "apache_combined", label: "Apache Combined" },
   { value: "apache_combined_vhost", label: "Combined + vhost" },
@@ -71,6 +77,19 @@ const builtInRules = BUILT_IN_RULES.map((rule) => ({
                     @click="store.setDisplayTimezone(tz.id)"
                   >{{ tz.label }}</span>
                 </div>
+              </div>
+              <div class="settings-row">
+                <div>
+                  <div>Time format</div>
+                  <div class="settings-sub">Used by the timestamp column in Access log.</div>
+                </div>
+                <AppSelect
+                  :model-value="store.timeDisplayFormat"
+                  :options="TIME_FORMATS"
+                  aria-label="Time display format"
+                  :menu-width="220"
+                  @update:model-value="store.setTimeDisplayFormat($event)"
+                />
               </div>
             </div>
           </template>
