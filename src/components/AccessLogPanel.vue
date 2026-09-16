@@ -10,6 +10,7 @@ const draggedColumn = ref(null);
 const dragOverColumn = ref(null);
 const columnMenuOpen = ref(false);
 let relativeTimer;
+const totalRows = computed(() => store.sources.reduce((sum, source) => sum + (source.rowCount || 0), 0));
 const domains = computed(() => {
   const values = store.tailRows
     .filter((row) => !store.tailSourceId || row.id.startsWith(store.tailSourceId + ":"))
@@ -186,6 +187,6 @@ onUnmounted(() => {
       </div>
       <div v-if="!loading && !store.filteredTailRows.length" class="access-message">No loaded rows match the current filters.</div>
     </div>
-    <div class="tail-foot"><span>{{ store.filteredTailRows.length.toLocaleString() }} matched / {{ store.tailRows.length.toLocaleString() }} loaded rows</span></div>
+    <div class="tail-foot"><span>{{ store.filteredTailRows.length.toLocaleString() }} matched / {{ store.tailRows.length.toLocaleString() }} loaded rows</span><span style="margin-left:auto;color:var(--color-text)">{{ totalRows.toLocaleString() }} total rows</span></div>
   </div>
 </template>

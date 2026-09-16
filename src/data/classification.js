@@ -68,11 +68,41 @@ export const BUILT_IN_RULES = [
     /\bfromCharCode\b/i.test(s)
   },
 
-  // Well-known webshell / backdoor filenames.
+  // Well-known webshell / backdoor filenames, flavoured by SecLists'
+  // Web-Shells wordlists (c99/r57/b374k/WSO families, Antichat, IndoXploit,
+  // common php-reverse-shell drops).
   { label: "webshell", severity: "high", scope: "url", test: (s) =>
-    /(?:^|\/)(?:c99|r57|b374k|wso|shell|cmd|webadmin|phpspy|backdoor)\.php/i.test(s) ||
-    /(?:^|\/)wp-content\/uploads\/.*\.php/i.test(s) ||
-    /\bshell\.php\b|\bsh\.php\b|\bcmd\.php\b/i.test(s)
+    /(?:^|\/)(?:c99\d*|r57\d*|b374k\d*|wso\d*(?:\.[0-9]+)?|webadmin|phpspy|backdoor\d*|webshell|antichat|indoxploit|locus7s|xiaoma|maicao|c100)\.(?:php\d*|phtml)(?:\?|$)/i.test(s) ||
+    /\b(?:shell|sh|cmd\d*|mini-shell|wwwshell)\.(?:php\d*|phtml|aspx?|jspx?|cgi|pl)(?:\?|$)/i.test(s) ||
+    /\b(?:php-reverse-shell|simple-php-backdoor|php-backdoor|web-shell)\.php/i.test(s) ||
+    /(?:^|\/)wp-content\/uploads\/[^?#]*\.php/i.test(s)
+  },
+
+  // Server-executable files where executables don't belong: PHP/JSP/ASP/CGI
+  // requested from static or user-writable dirs (upload holding pens, tmp,
+  // media), plus the classic "1.jpg.php" double-extension drop.
+  { label: "uploaded executable", severity: "high", scope: "url", test: (s) =>
+    /\.(?:jpe?g|png|gif|bmp|ico|svg|webp|avif|tiff?|pdf|txt)\.(?:php\d*|phtml|aspx?|jspx?|cgi|pl|py|sh)(?:\?|$)/i.test(s) ||
+    /(?:^|\/)(?:uploads?|tmp|temp|files|media|images?|img|assets|static|cache|storage|downloads?|backups?)\/[^?#]*\.(?:php\d*|phtml|aspx?|jspx?|cgi|pl|py|sh)(?:\?|$)/i.test(s)
+  },
+
+  // Local / remote file inclusion primitives: PHP stream wrappers and
+  // include-style parameters carrying traversal or absolute URLs.
+  { label: "file inclusion", severity: "high", scope: "url", test: (s) =>
+    /(?:php|data|expect|phar|zip|rar|file|ftp):\/\//i.test(s) ||
+    /(?:^|[?&])(?:include|inc|file|page|doc|get|view|dir|show|local|template|module|download|read|path)\s*=\s*(?:\.\.(?:\.|%2e|\/|%2f|\\|%5c)+|(?:https?|ftp):\/\/)/i.test(s) ||
+    /\b__(?:file|autoload|include)__\b/i.test(s)
+  },
+
+  // Server-side template injection breadcrumbs: arithmetic/payload tokens in
+  // {{ }}, ${ }, #{ }, ${{ }}, <%=, and Python MRO/object-magic chains.
+  { label: "template injection", severity: "high", scope: "url", test: (s) =>
+    /\{\{\s*(?:7\s*\*\s*7|config|self[.\[]|request[.\[]|application|constructor)\b[^{}\s]{0,25}\}\}/i.test(s) ||
+    /\$\{\s*7\s*\*\s*7\s*\}/.test(s) ||
+    /\#\{\s*7\s*\*\s*7\s*\}/.test(s) ||
+    /\${{[^{}]{0,30}}}/.test(s) ||
+    /<%[=-]?\s*7\s*\*\s*7/.test(s) ||
+    /\b__(?:class|init|globals|import|mro|bases|subclasses|builtins)__\b|\bos\.popen\b|\bsystem\s*\(\s*['"]/i.test(s)
   },
 
   // ---- lower severity: probing / scanning behavior ----
@@ -86,7 +116,10 @@ export const BUILT_IN_RULES = [
     /\.(?:bak|old|orig|save|swp|swo)(?:\?|$)/i.test(s) ||
     /(?:backup|dump|db)\.(?:sql|zip|tar|tar\.gz|gz)(?:\?|$)/i.test(s) ||
     /\.aws\/(?:credentials|config)/i.test(s) ||
-    /%00/i.test(s)
+    /%00/i.test(s) ||
+    /(?:^|\/)\.(?:htpasswd|htgroup|htusers|git-credentials|npmrc|pypirc|netrc)(?:\?|$)/i.test(s) ||
+    /(?:^|\/)\.(?:svn|hg|bzr)\//i.test(s) ||
+    /(?:^|\/)(?:\.ssh\/)?id_(?:rsa|dsa|ecdsa)\b/i.test(s)
   },
 
   // Admin / login / management surface probing.
@@ -100,13 +133,37 @@ export const BUILT_IN_RULES = [
     /(?:^|\/)user_login(?:\?|$)/i.test(s) ||
     /(?:^|\/)server-status(?:\/?|\?|$)/i.test(s) ||
     /(?:^|\/)manager\/html(?:\/?|\?|$)/i.test(s) ||
+    /(?:^|\/)(?:cpanel|plesk|webmin|roundcube|owa|actuator)(?:\/|\?|$)/i.test(s) ||
     /\?author=\d+/i.test(s)
   },
 
   // Known scanner/attack tooling announcing itself in the user agent.
   { label: "scanner", severity: "warn", scope: "ua", test: (s) =>
-    /\b(?:sqlmap|nmap|nikto|nessus|masscan|zgrab|acunetix|openvas|wpscan|dirbuster|gobuster|nuclei|ffuf|wfuzz|hydra|metasploit|patator)\b/i.test(s) ||
+    /\b(?:sqlmap|nmap|nikto|nessus|masscan|zgrab|acunetix|openvas|wpscan|dirbuster|gobuster|nuclei|ffuf|wfuzz|hydra|metasploit|patator|wafw00f|jaeles|xray|arjun|fscan|zmap)\b/i.test(s) ||
     /\bfuzz(?:ing|er)?\b/i.test(s)
+  },
+
+  // SSRF breadcrumbs: internal/metadata destinations, or absolute URLs in
+  // fetch-style parameters.
+  { label: "SSRF probe", severity: "warn", scope: "url", test: (s) =>
+    /\b(?:https?|ftp):\/\/(?:127\.0\.0\.1|localhost(?::\d+)?|0\.0\.0\.0|\[?::1\]?|\[?::ffff:127\.0\.0\.1\]?|169\.254\.169\.254|metadata\.(?:google\.internal|compute\.google)|100\.100\.100\.200|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})(?:[/:?#]|$)/i.test(s) ||
+    /(?:^|[?&])(?:url|uri|u|dest|redirect|redirect_url|return|return_url|callback|webhook|proxy|target|open|next|go|redir|rurl|back|out)\s*=\s*https?:\/\//i.test(s) ||
+    /(?:^|[?&])(?:ip|host|hostname|server|target|proxy|url|uri)\s*=\s*(?:127\.0\.0\.1|localhost(?::\d+)?|0\.0\.0\.0|169\.254\.169\.254|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})(?:[&]|$)/i.test(s)
+  },
+
+  // Heavily obfuscated payloads: chained percent/hex escapes, .NET double
+  // unicode escapes, and PHP eval(decode()) chains.
+  { label: "obfuscated payload", severity: "warn", scope: "url", test: (s) =>
+    /\beval\s*\(\s*(?:base64_decode|gzinflate|gzuncompress|str_rot13|pack)\s*\(/i.test(s) ||
+    /(?:%u[0-9a-fA-F]{4})+/i.test(s) ||
+    /\\x(?:[0-9a-fA-F]{2}){3,}/i.test(s) ||
+    /(?:%[0-9a-fA-F]{2}){4,}/i.test(s)
+  },
+
+  // Probes for debug/test surfaces that hand out internals.
+  { label: "debug probe", severity: "warn", scope: "url", test: (s) =>
+    /(?:^|\/)(?:phpinfo|info|test|debug)\.php(?:\?|$)/i.test(s) ||
+    /(?:^|[?&])(?:debug|trace|verbose|test|show_errors)\s*=\s*(?:1|true|on|yes)\b/i.test(s)
   },
 ];
 

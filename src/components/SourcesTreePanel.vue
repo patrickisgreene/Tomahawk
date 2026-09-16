@@ -1,8 +1,11 @@
 <script setup>
+import { ref } from "vue";
 import { useMonitorStore } from "../store/monitor";
 import { formatRelative } from "../data/format";
+import ConfirmDialog from "./ConfirmDialog.vue";
 
 const store = useMonitorStore();
+const pendingRemove = ref(null);
 
 function iconFor(source) {
   return source.kind === "directory" ? "ph-folder" : "ph-file-text";
@@ -14,9 +17,14 @@ function onRowClick(source) {
   if (source.kind === "directory" && source.files.length) store.toggleSourceExpanded(source.id);
 }
 function onRemove(source) {
-  if (window.confirm(`Remove "${source.label}"? This deletes its stored log data and can't be undone.`)) {
-    store.removeSource(source.id);
-  }
+  pendingRemove.value = source;
+}
+function cancelRemove() {
+  pendingRemove.value = null;
+}
+function confirmRemove() {
+  if (pendingRemove.value) store.removeSource(pendingRemove.value.id);
+  pendingRemove.value = null;
 }
 </script>
 
@@ -58,5 +66,14 @@ function onRemove(source) {
         </div>
       </template>
     </div>
+    <ConfirmDialog
+      v-if="pendingRemove"
+      title="Remove source"
+      :message="`Remove &quot;${pendingRemove.label}&quot;? This deletes its stored log data and can't be undone.`"
+      confirm-label="Remove"
+      danger
+      @confirm="confirmRemove"
+      @cancel="cancelRemove"
+    />
   </div>
 </template>

@@ -5,6 +5,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useMonitorStore } from "../store/monitor";
 import { useRelativeTime } from "../composables/useRelativeTime";
 import FileMenuDropdown from "./FileMenuDropdown.vue";
+import PromptDialog from "./PromptDialog.vue";
 import { classifyRequest } from "../data/classification";
 
 const store = useMonitorStore();
@@ -52,7 +53,10 @@ function closeWindow() {
   appWindow.close();
 }
 function newWorkspace() { store.createWorkspace(); }
-function rename(item) { const name = window.prompt("Workspace name", item.name); if (name) store.renameWorkspace(item.id, name); }
+const renaming = ref(null);
+function rename(item) { renaming.value = item; }
+function cancelRename() { renaming.value = null; }
+function confirmRename(name) { if (renaming.value) store.renameWorkspace(renaming.value.id, name); renaming.value = null; }
 function openSecurityAlerts() { store.panelVisibility.bottom = true; store.dockActiveTab.bottom = "alerts"; }
 function closeResyncMenu() { resyncOpen.value = false; }
 function setResyncInterval(value) {
@@ -124,5 +128,14 @@ if (store.workspaces.length && store.workspaces[0].id === "monitor" && store.wor
       </button>
       <button class="icon-btn" title="Close" @click="closeWindow"><i class="ph ph-x"></i></button>
     </div>
+    <PromptDialog
+      v-if="renaming"
+      title="Rename workspace"
+      label="Workspace name"
+      :initial="renaming.name"
+      confirm-label="Save"
+      @confirm="confirmRename"
+      @cancel="cancelRename"
+    />
   </div>
 </template>
