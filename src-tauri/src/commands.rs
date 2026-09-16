@@ -649,44 +649,6 @@ pub async fn list_domains(source_id: Option<String>) -> Result<Vec<String>, Stri
     .map_err(|e| e.to_string())?
 }
 
-/// Latest published release for the update-available badge. Done in Rust so
-/// the WebView never makes a cross-origin GitHub request (which WebView2's
-/// tracking prevention logs as blocked storage access).
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LatestRelease {
-    pub tag_name: String,
-    pub html_url: String,
-}
-
-#[tauri::command]
-pub async fn check_latest_release(repo: String) -> Result<Option<LatestRelease>, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let client = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(8))
-            .user_agent("Tomahawk")
-            .build()
-            .map_err(|e| e.to_string())?;
-        let response = client
-            .get(format!("https://api.github.com/repos/{repo}/releases/latest"))
-            .header("Accept", "application/vnd.github+json")
-            .send()
-            .map_err(|e| e.to_string())?;
-        if !response.status().is_success() {
-            return Ok(None);
-        }
-        let body: serde_json::Value = response.json().map_err(|e| e.to_string())?;
-        let tag_name = body.get("tag_name").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-        let html_url = body.get("html_url").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-        if tag_name.is_empty() && html_url.is_empty() {
-            return Ok(None);
-        }
-        Ok(Some(LatestRelease { tag_name, html_url }))
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
 fn format_time(ts_ms: i64) -> String {
     chrono::DateTime::from_timestamp_millis(ts_ms)
         .map(|dt| dt.format("%H:%M:%S").to_string())

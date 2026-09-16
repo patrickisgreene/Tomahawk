@@ -2,9 +2,8 @@
 import { ref, computed, onMounted, onUnmounted } from "vue";
 import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, PanelBottomClose, PanelBottomOpen } from "@lucide/vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { getVersion } from "@tauri-apps/api/app";
-import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { check } from "@tauri-apps/plugin-updater";
 import { useMonitorStore } from "../store/monitor";
 import { useRelativeTime } from "../composables/useRelativeTime";
 import FileMenuDropdown from "./FileMenuDropdown.vue";
@@ -16,46 +15,53 @@ const syncedAgo = useRelativeTime(() => store.lastSyncedAt);
 const resyncOpen = ref(false);
 const securityWarningCount = computed(() => store.tailRows.reduce((count, row) => count + classifyRequest(row, store.localRules).length, 0));
 const securityHighCount = computed(() => store.tailRows.reduce((count, row) => count + classifyRequest(row, store.localRules).filter((tag) => tag.severity === "high").length, 0));
-// Checks the GitHub releases page so the badge stays hidden until a newer
-// release is published, then opens the release page when clicked.
-const REPO = "patrickisgreene/Tomahawk";
-const RELEASE_PAGE = `https://github.com/${REPO}/releases/latest`;
+// Checks for a signed release via the Tauri updater (no more manual GitHub
+// API comparison — the updater compares versions itself). Clicking the badge
+// downloads the update in-place, installs it, and relaunches the app.
+const RELEASE_PAGE = `https://github.com/patrickisgreene/Tomahawk/releases/latest`;
 const UPDATE_CHECK_MS = 30 * 60 * 1000;
 const updateAvailable = ref(false);
-const releaseUrl = ref(RELEASE_PAGE);
-let currentVersion = null;
+const updateDownloading = ref(false);
+const updateProgress = ref(0);
+let pendingUpdate = null;
 let updateTimer;
-
-function parseVersion(text) {
-  const match = String(text || "").trim().replace(/^v/i, "").match(/^(\d+)(?:\.(\d+))?(?:\.(\d+))?/);
-  if (!match) return null;
-  return [+match[1] || 0, +match[2] || 0, +match[3] || 0];
-}
-
-function isNewerVersion(candidate, current) {
-  if (!candidate || !current) return false;
-  return (
-    candidate[0] > current[0] ||
-    (candidate[0] === current[0] && candidate[1] > current[1]) ||
-    (candidate[0] === current[0] && candidate[1] === current[1] && candidate[2] > current[2])
-  );
-}
 
 async function checkForUpdate() {
   try {
-    const release = await invoke("check_latest_release", { repo: REPO });
-    if (!release) return;
-    if (isNewerVersion(parseVersion(release.tagName), currentVersion)) {
-      releaseUrl.value = release.htmlUrl || RELEASE_PAGE;
-      updateAvailable.value = true;
-    }
+    const update = await check();
+    pendingUpdate = update;
+    updateAvailable.value = !!update;
   } catch {
-    // ignore network/parse failures; keep the badge hidden
+    // Endpoint unreachable/not published yet — keep the badge hidden.
+    pendingUpdate = null;
+    updateAvailable.value = false;
   }
 }
 
-function openReleasePage() {
-  openUrl(releaseUrl.value);
+async function updateNow() {
+  if (pendingUpdate) {
+    updateDownloading.value = true;
+    updateProgress.value = 0;
+    let downloaded = 0;
+    let contentLength = 0;
+    try {
+      await pendingUpdate.downloadAndInstall((event) => {
+        if (event.event === "Started") {
+          downloaded = 0;
+          contentLength = event.data.contentLength;
+        } else if (event.event === "Progress") {
+          downloaded += event.data.chunkLength;
+          if (contentLength > 0) updateProgress.value = downloaded / contentLength;
+        }
+      });
+      // The updater relaunches the app after installing; nothing left to do.
+      return;
+    } catch {
+      updateDownloading.value = false;
+    }
+  }
+  // Fallback for dev builds or when the updater can't engage: open the page.
+  openUrl(RELEASE_PAGE);
 }
 const intervals = [
   [1800000, "Every 30 minutes"],
@@ -79,11 +85,6 @@ async function syncMaximized() {
 onMounted(async () => {
   await syncMaximized();
   unlistenResize = await appWindow.onResized(syncMaximized);
-  try {
-    currentVersion = parseVersion(await getVersion());
-  } catch {
-    currentVersion = null;
-  }
   await checkForUpdate();
   updateTimer = setInterval(checkForUpdate, UPDATE_CHECK_MS);
 });
@@ -169,7 +170,7 @@ if (store.workspaces.length && store.workspaces[0].id === "monitor" && store.wor
     <button v-if="securityWarningCount" class="alert-badge security-badge" :class="{ 'has-high': securityHighCount }" @click="openSecurityAlerts" title="Open classified security warnings">
       <i class="ph ph-shield-warning"></i>{{ securityWarningCount.toLocaleString() }} security warning{{ securityWarningCount === 1 ? '' : 's' }}
     </button>
-    <button v-if="updateAvailable" class="warning-badge" title="A new version is available - open the release page" @click="openReleasePage"><i class="ph ph-download-simple"></i>Update available</button>
+    <button v-if="updateAvailable" class="warning-badge" :title="updateDownloading ? 'Downloading the update…' : 'A new version is available — click to update'" @click="updateNow" :disabled="updateDownloading"><i class="ph" :class="updateDownloading ? 'ph-circle-notch spin' : 'ph-download-simple'"></i>{{ updateDownloading ? `Updating… ${Math.round(updateProgress * 100)}%` : "Update available" }}</button>
     <div class="window-controls">
       <button class="icon-btn" title="Minimize" @click="minimizeWindow"><i class="ph ph-minus"></i></button>
       <button class="icon-btn" title="Maximize" @click="toggleMaximizeWindow">
