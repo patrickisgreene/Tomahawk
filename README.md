@@ -1,6 +1,6 @@
 # Tomahawk (Apache Log Monitor)
 <p align="center">
-  <img align="middle" src="screenshots/screenshot.png" alt="Other Means emblem" />
+  <img align="middle" src="images/screenshot.png" alt="Tomahawk" />
 </p>
 
 A desktop log-monitoring dashboard built on **Tauri 2 + Vue 3**. It tails
