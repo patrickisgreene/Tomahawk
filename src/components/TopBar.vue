@@ -2,6 +2,8 @@
 import { ref, computed, onMounted, onUnmounted } from "vue";
 import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, PanelBottomClose, PanelBottomOpen } from "@lucide/vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getVersion } from "@tauri-apps/api/app";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { useMonitorStore } from "../store/monitor";
 import { useRelativeTime } from "../composables/useRelativeTime";
 import FileMenuDropdown from "./FileMenuDropdown.vue";
@@ -13,9 +15,49 @@ const syncedAgo = useRelativeTime(() => store.lastSyncedAt);
 const resyncOpen = ref(false);
 const securityWarningCount = computed(() => store.tailRows.reduce((count, row) => count + classifyRequest(row, store.localRules).length, 0));
 const securityHighCount = computed(() => store.tailRows.reduce((count, row) => count + classifyRequest(row, store.localRules).filter((tag) => tag.severity === "high").length, 0));
-// Kept as a single UI flag so the updater can populate it once an update
-// endpoint/signing configuration is provided.
+// Checks the GitHub releases page so the badge stays hidden until a newer
+// release is published, then opens the release page when clicked.
+const REPO = "patrickisgreene/Tomahawk";
+const RELEASE_API = `https://api.github.com/repos/${REPO}/releases/latest`;
+const RELEASE_PAGE = `https://github.com/${REPO}/releases/latest`;
+const UPDATE_CHECK_MS = 30 * 60 * 1000;
 const updateAvailable = ref(false);
+const releaseUrl = ref(RELEASE_PAGE);
+let currentVersion = null;
+let updateTimer;
+
+function parseVersion(text) {
+  const match = String(text || "").trim().replace(/^v/i, "").match(/^(\d+)(?:\.(\d+))?(?:\.(\d+))?/);
+  if (!match) return null;
+  return [+match[1] || 0, +match[2] || 0, +match[3] || 0];
+}
+
+function isNewerVersion(candidate, current) {
+  if (!candidate || !current) return false;
+  return (
+    candidate[0] > current[0] ||
+    (candidate[0] === current[0] && candidate[1] > current[1]) ||
+    (candidate[0] === current[0] && candidate[1] === current[1] && candidate[2] > current[2])
+  );
+}
+
+async function checkForUpdate() {
+  try {
+    const res = await fetch(RELEASE_API, { headers: { Accept: "application/vnd.github+json" } });
+    if (!res.ok) return;
+    const release = await res.json();
+    if (isNewerVersion(parseVersion(release.tag_name), currentVersion)) {
+      releaseUrl.value = release.html_url || RELEASE_PAGE;
+      updateAvailable.value = true;
+    }
+  } catch {
+    // ignore network/parse failures; keep the badge hidden
+  }
+}
+
+function openReleasePage() {
+  openUrl(releaseUrl.value);
+}
 const intervals = [
   [1800000, "Every 30 minutes"],
   [3600000, "Every hour"],
@@ -38,9 +80,17 @@ async function syncMaximized() {
 onMounted(async () => {
   await syncMaximized();
   unlistenResize = await appWindow.onResized(syncMaximized);
+  try {
+    currentVersion = parseVersion(await getVersion());
+  } catch {
+    currentVersion = null;
+  }
+  await checkForUpdate();
+  updateTimer = setInterval(checkForUpdate, UPDATE_CHECK_MS);
 });
 onUnmounted(() => {
   unlistenResize?.();
+  clearInterval(updateTimer);
 });
 
 function minimizeWindow() {
@@ -120,7 +170,7 @@ if (store.workspaces.length && store.workspaces[0].id === "monitor" && store.wor
     <button v-if="securityWarningCount" class="alert-badge security-badge" :class="{ 'has-high': securityHighCount }" @click="openSecurityAlerts" title="Open classified security warnings">
       <i class="ph ph-shield-warning"></i>{{ securityWarningCount.toLocaleString() }} security warning{{ securityWarningCount === 1 ? '' : 's' }}
     </button>
-    <button v-if="updateAvailable" class="warning-badge" title="An app update is available"><i class="ph ph-download-simple"></i>Update available</button>
+    <button v-if="updateAvailable" class="warning-badge" title="A new version is available - open the release page" @click="openReleasePage"><i class="ph ph-download-simple"></i>Update available</button>
     <div class="window-controls">
       <button class="icon-btn" title="Minimize" @click="minimizeWindow"><i class="ph ph-minus"></i></button>
       <button class="icon-btn" title="Maximize" @click="toggleMaximizeWindow">
