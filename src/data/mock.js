@@ -196,7 +196,6 @@ export const panelCatalog = [
   ] },
   { group: "Analysis", items: [
     { id: "query", icon: "ph-funnel", name: "Query builder", desc: "Visual field/operator conditions over any source" },
-    { id: "traffic", icon: "ph-chart-line", name: "Status & latency charts", desc: "Hit volume, status-code mix, p95/p99 over time" },
     { id: "talkers", icon: "ph-ranking", name: "Top talkers", desc: "Ranked clients, paths, agents and referrers" },
     { id: "throughput", icon: "ph-pulse", name: "Throughput", desc: "Req/s and 5xx rate sparklines" },
     { id: "mix", icon: "ph-faders", name: "Status mix", desc: "2xx/3xx/4xx/5xx split and p95 for the current window" },
@@ -209,20 +208,6 @@ export const panelCatalog = [
     { id: "history", icon: "ph-clock-counter-clockwise", name: "History", desc: "Recently viewed log lines" },
   ] },
 ];
-
-// ---- Add source dialog (t2) SFTP tab — a tiny mock filesystem, keyed by
-// "/"-joined path. The File/Directory tabs browse the real filesystem now
-// (see src/data/sourcesApi.js); SFTP browsing is still mocked pending M3
-// (a real SSH/SFTP client on the Rust side).
-export const sftpBrowserFS = {
-  "/var/log": [
-    { name: "httpd", kind: "dir" },
-  ],
-  "/var/log/httpd": [
-    { name: "httpd-access.log", kind: "file", modified: "just now", size: "1.1 GB", format: "Combined format" },
-    { name: "httpd-error.log", kind: "file", modified: "1m ago", size: "88 MB" },
-  ],
-};
 
 // ---- Traffic tab (t4c) — the stacked status-mix strip under the chart. ----
 export function statusBarsData() {

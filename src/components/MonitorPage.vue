@@ -37,9 +37,9 @@ watch(() => [store.dockTabs, store.dockActiveTab, store.panelVisibility], () => 
         class="col-mid-bottom"
         :style="{ gridTemplateColumns: `minmax(0, 1fr) 5px ${store.panelSizes.mix}px` }"
       >
-        <Dock dock-id="bottom" />
-        <Splitter axis="width" target="mix" invert />
-        <Dock dock-id="mix">
+        <Dock class="bottom-query-dock" dock-id="bottom" />
+        <Splitter class="bottom-mix-splitter" axis="width" target="mix" invert />
+        <Dock class="bottom-status-dock" dock-id="mix">
           <template #trailing>
             <div style="margin-left:auto;display:flex;gap:6px;color:var(--color-neutral-600);font-size:11px">
               <i class="ph ph-arrows-out-line-horizontal"></i><i class="ph ph-pause"></i>

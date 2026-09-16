@@ -2,7 +2,7 @@ import { acceptHMRUpdate, defineStore } from "pinia";
 import {
   seedTailRows,
   hostsData, dayBarsData, topPagesData, topAgentsData, alertRules,
-  panelCatalog, sftpBrowserFS, statusBarsData,
+  panelCatalog, statusBarsData,
 } from "../data/mock";
 import { createLogSource, isTauri, loadRecentRows } from "../data/logSource";
 import { listLocalDir, addSource as addSourceApi, removeSource as removeSourceApi, listSources, listQueryFields } from "../data/sourcesApi";
@@ -12,7 +12,49 @@ import { joinLocalPath, localPathCrumbs } from "../data/localPath";
 
 const MAX_HISTORY = 60;
 const SAVED_QUERIES_KEY = "tomahawk.savedQueries";
+const SETTINGS_KEY = "tomahawk.settings";
 const WORKSPACES_KEY = "tomahawk.workspaces";
+const DEFAULT_LOCAL_RULES = {
+  builtInEnabled: true,
+  botDetectionEnabled: true,
+  disabledBuiltInRuleIds: [],
+  customRules: [],
+};
+function loadSettings() {
+  try {
+    const value = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
+    return value && typeof value === "object" ? value : {};
+  } catch {
+    return {};
+  }
+}
+function saveSettings(value) { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(value)); } catch {} }
+const INITIAL_SETTINGS = loadSettings();
+function normalizeLocalRules(value) {
+  const input = value && typeof value === "object" ? value : {};
+  return {
+    builtInEnabled: input.builtInEnabled !== false,
+    botDetectionEnabled: input.botDetectionEnabled !== false,
+    disabledBuiltInRuleIds: Array.isArray(input.disabledBuiltInRuleIds) ? input.disabledBuiltInRuleIds.filter(Boolean) : [],
+    customRules: Array.isArray(input.customRules)
+      ? input.customRules.map((rule) => ({
+          id: rule.id || `local_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+          label: rule.label || "",
+          scope: rule.scope || "url",
+          pattern: rule.pattern || "",
+          severity: rule.severity === "high" ? "high" : "warn",
+          enabled: rule.enabled !== false,
+        }))
+      : [],
+  };
+}
+function persistedSettings(store) {
+  return {
+    displayTimezone: store.displayTimezone,
+    defaultLogFormat: store.defaultLogFormat,
+    localRules: store.localRules,
+  };
+}
 function loadWorkspaces() {
   try { const value = JSON.parse(localStorage.getItem(WORKSPACES_KEY) || "null"); return Array.isArray(value) && value.length ? value : null; } catch { return null; }
 }
@@ -205,7 +247,7 @@ export const useMonitorStore = defineStore("monitor", {
 
     // ---- docks: which panels are open where, and which is focused ----
     dockTabs: {
-      stream: ["access", "traffic"],
+      stream: ["access"],
       bottom: ["query", "alerts"],
       inspector: ["inspector", "history"],
       sources: ["sources", "saved"],
@@ -228,23 +270,24 @@ export const useMonitorStore = defineStore("monitor", {
 
     // ---- add source dialog (t2) ----
     showAddSourceDialog: false,
-    addSourceTab: "file", // file | directory | sftp
+    addSourceTab: "file", // file | directory
     addSourceRealPath: null, // absolute path currently browsed; null until first loaded
     addSourceError: null,
     addSourceListing: [],
     addSourceLoading: false,
+    addSourceSaving: false,
     addSourceSelected: null,
     addSourceFilterText: "",
     addSourceHideHidden: true,
     addSourcePattern: "access.log*", // directory kind only
     addSourceIncludeSubfolders: false, // directory kind only
-    sftpPath: ["", "var", "log", "httpd"],
-    sftpSelected: "httpd-access.log",
-    sftpConnected: true,
 
     // ---- settings dialog (t5b) ----
     showSettingsDialog: false,
     settingsSection: "general",
+    displayTimezone: INITIAL_SETTINGS.displayTimezone || "local", // local | utc | source
+    defaultLogFormat: INITIAL_SETTINGS.defaultLogFormat || "apache_combined",
+    localRules: normalizeLocalRules(INITIAL_SETTINGS.localRules || DEFAULT_LOCAL_RULES),
 
     // ---- file menu dropdown (t5a) ----
     showFileMenu: false,
@@ -399,9 +442,6 @@ export const useMonitorStore = defineStore("monitor", {
     },
     selectedAlert(state) {
       return state.alertRules.find((a) => a.id === state.selectedAlertId) || null;
-    },
-    sftpListing(state) {
-      return sftpBrowserFS[state.sftpPath.join("/")] || [];
     },
     filteredSources(state) {
       const q = state.hostFilter.trim().toLowerCase();
@@ -756,6 +796,7 @@ togglePanel(side) {
       if (!this.addSourceRealPath) await this.browseAddSourceDir(null);
     },
     closeAddSourceDialog() {
+      if (this.addSourceSaving) return;
       this.showAddSourceDialog = false;
     },
     setAddSourceTab(tab) {
@@ -809,42 +850,36 @@ togglePanel(side) {
         this.addSourceSelected = null;
       }
     },
-    openSftpFolder(name) {
-      this.sftpPath = [...this.sftpPath, name];
-    },
-    goToSftpCrumb(index) {
-      this.sftpPath = this.sftpPath.slice(0, index + 1);
-    },
-    selectSftpFile(name) {
-      this.sftpSelected = name;
-    },
     async loadSources() {
       this.sources = await listSources();
     },
     async confirmAddSource() {
-      if (this.addSourceTab === "sftp") {
-        // SFTP sources aren't wired up yet (a separate milestone — needs a
-        // real SSH/SFTP client on the Rust side) — closing here is the
-        // honest stopping point rather than pretending it was added.
-        this.showAddSourceDialog = false;
-        return;
-      }
+      if (this.addSourceSaving) return;
       const kind = this.addSourceTab; // "file" | "directory"
       const path = kind === "file" ? joinLocalPath(this.addSourceRealPath, this.addSourceSelected) : this.addSourceRealPath;
       const label = kind === "file" ? this.addSourceSelected : localPathCrumbs(path).at(-1)?.label || path;
-      await addSourceApi({
-        kind,
-        label,
-        path,
-        pattern: kind === "directory" ? this.addSourcePattern : undefined,
-        includeSubfolders: kind === "directory" ? this.addSourceIncludeSubfolders : undefined,
-      });
-      await this.loadSources();
-      this.showAddSourceDialog = false;
-      // Give immediate feedback (spinner/skeleton) instead of silently
-      // waiting for the next automatic resync tick, which could be up to
-      // resyncIntervalMs away.
-      this.resyncNow().catch((e) => console.error("[addSource] resync failed", e));
+      this.addSourceSaving = true;
+      this.addSourceError = null;
+      try {
+        await addSourceApi({
+          kind,
+          label,
+          path,
+          pattern: kind === "directory" ? this.addSourcePattern : undefined,
+          includeSubfolders: kind === "directory" ? this.addSourceIncludeSubfolders : undefined,
+          logFormat: this.defaultLogFormat,
+        });
+        await this.loadSources();
+        this.showAddSourceDialog = false;
+        // Give immediate feedback (spinner/skeleton) instead of silently
+        // waiting for the next automatic resync tick, which could be up to
+        // resyncIntervalMs away.
+        this.resyncNow().catch((e) => console.error("[addSource] resync failed", e));
+      } catch (error) {
+        this.addSourceError = error instanceof Error ? error.message : String(error);
+      } finally {
+        this.addSourceSaving = false;
+      }
     },
 
     // ---- settings dialog ----
@@ -857,6 +892,52 @@ togglePanel(side) {
     },
     setSettingsSection(section) {
       this.settingsSection = section;
+    },
+    setDisplayTimezone(mode) {
+      this.displayTimezone = mode;
+      saveSettings(persistedSettings(this));
+    },
+    setDefaultLogFormat(format) {
+      this.defaultLogFormat = format;
+      saveSettings(persistedSettings(this));
+    },
+    persistSettings() {
+      saveSettings(persistedSettings(this));
+    },
+    setLocalRulesFlag(flag, enabled) {
+      if (!Object.hasOwn(this.localRules, flag)) return;
+      this.localRules[flag] = !!enabled;
+      this.persistSettings();
+    },
+    toggleBuiltInRule(ruleId) {
+      const disabled = new Set(this.localRules.disabledBuiltInRuleIds);
+      if (disabled.has(ruleId)) disabled.delete(ruleId);
+      else disabled.add(ruleId);
+      this.localRules.disabledBuiltInRuleIds = [...disabled];
+      this.persistSettings();
+    },
+    addLocalRule() {
+      this.localRules.customRules.push({
+        id: `local_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+        label: "Local rule",
+        scope: "url",
+        pattern: "",
+        severity: "warn",
+        enabled: true,
+      });
+      this.persistSettings();
+    },
+    updateLocalRule(id, patch) {
+      const rule = this.localRules.customRules.find((item) => item.id === id);
+      if (!rule) return;
+      Object.assign(rule, patch);
+      if (rule.severity !== "high") rule.severity = "warn";
+      if (!["url", "ua", "ip", "method", "status", "raw"].includes(rule.scope)) rule.scope = "url";
+      this.persistSettings();
+    },
+    removeLocalRule(id) {
+      this.localRules.customRules = this.localRules.customRules.filter((rule) => rule.id !== id);
+      this.persistSettings();
     },
 
     // ---- file menu ----

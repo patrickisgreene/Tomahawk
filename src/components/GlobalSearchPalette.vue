@@ -42,7 +42,6 @@ function filterByClient() {
           @keydown.esc="store.closeGlobalSearch()"
           placeholder="Search clients, hosts, filters, settings…"
         >
-        <span class="kbd-hint">esc</span>
       </div>
       <div class="popover-list" style="max-height:340px">
         <template v-if="matchedClient">
@@ -53,7 +52,6 @@ function filterByClient() {
               <div class="popover-item-name">{{ matchedClient.ip }}</div>
               <div class="popover-item-desc">{{ matchedClient.info.geo }} · classified {{ matchedClient.info.bot ? "bot" : "human" }} · {{ matchedClient.info.rate }}</div>
             </div>
-            <span class="kbd-hint-inline">↵</span>
           </div>
         </template>
 
@@ -90,8 +88,6 @@ function filterByClient() {
         <div class="popover-item" @click="goTo('alerts')"><i class="ph ph-bell-ringing"></i><span class="popover-item-name" style="font-weight:400">Alerts</span></div>
       </div>
       <div class="popover-foot">
-        <span><span class="kbd-hint-inline">↑↓</span> navigate</span>
-        <span><span class="kbd-hint-inline">↵</span> go</span>
         <span style="margin-left:auto">searches hosts, sources, clients, filters, settings</span>
       </div>
     </div>

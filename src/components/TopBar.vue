@@ -9,8 +9,8 @@ import { classifyRequest } from "../data/classification";
 
 const store = useMonitorStore();
 const syncedAgo = useRelativeTime(() => store.lastSyncedAt);
-const securityWarningCount = computed(() => store.tailRows.reduce((count, row) => count + classifyRequest(row).length, 0));
-const securityHighCount = computed(() => store.tailRows.reduce((count, row) => count + classifyRequest(row).filter((tag) => tag.severity === "high").length, 0));
+const securityWarningCount = computed(() => store.tailRows.reduce((count, row) => count + classifyRequest(row, store.localRules).length, 0));
+const securityHighCount = computed(() => store.tailRows.reduce((count, row) => count + classifyRequest(row, store.localRules).filter((tag) => tag.severity === "high").length, 0));
 // Kept as a single UI flag so the updater can populate it once an update
 // endpoint/signing configuration is provided.
 const updateAvailable = ref(false);
@@ -80,8 +80,9 @@ if (store.workspaces.length && store.workspaces[0].id === "monitor" && store.wor
     </div>
     <details class="resync-picker header-resync">
       <summary class="tail-state" title="Resync settings">
-      <i class="ph ph-arrows-clockwise"></i>
-      <span>Resync</span>
+      <i class="ph" :class="store.isSyncing ? 'ph-spinner spin' : 'ph-arrows-clockwise'"></i>
+      <span>{{ store.isSyncing ? "Syncing" : "Resync" }}</span>
+      <span class="tail-interval">{{ intervalLabel }}</span>
       <span class="caret">▾</span>
       </summary>
       <div class="resync-options">
@@ -89,6 +90,7 @@ if (store.workspaces.length && store.workspaces[0].id === "monitor" && store.wor
         <fieldset><legend>Automatic resync</legend><label v-for="[value, label] in intervals" :key="value"><input type="radio" name="header-resync-interval" :value="value" :checked="store.resyncIntervalMs === value" @change="store.setResyncInterval(value)">{{ label }}</label></fieldset>
       </div>
     </details>
+    <span class="header-sync-age">{{ store.isSyncing ? "syncing now" : "synced " + syncedAgo }}</span>
     <div class="topbar-nav">
       <button class="icon-btn" title="Search everything" @click="store.openGlobalSearch()"><i class="ph ph-magnifying-glass"></i></button>
       <span v-for="item in store.workspaces" :key="item.id"

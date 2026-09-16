@@ -8,7 +8,7 @@
 // "Classified" tags in the inspector flag patterns worth a human look;
 // they never claim an exploit succeeded.
 
-const RULES = [
+export const BUILT_IN_RULES = [
   // ---- high severity: exploit-shaped strings ----
 
   // Dot-dot path traversal / local file inclusion.
@@ -120,8 +120,32 @@ const BOT_UA = [
 
 const WEIGHT = { high: 2, warn: 1 };
 
-function slug(label) {
+export function slug(label) {
   return label.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+}
+
+function enabledBuiltInRule(rule, settings) {
+  if (settings?.builtInEnabled === false) return false;
+  const disabled = settings?.disabledBuiltInRuleIds || [];
+  return !disabled.includes(slug(rule.label));
+}
+
+function targetForRule(row, scope, rawPath, decodedPath) {
+  if (scope === "ua") return row?.userAgent || "";
+  if (scope === "ip") return row?.ip || "";
+  if (scope === "method") return row?.method || "";
+  if (scope === "status") return String(row?.status ?? "");
+  if (scope === "raw") return row?.raw || "";
+  return `${rawPath} ${decodedPath}`;
+}
+
+function customRuleMatches(rule, target) {
+  if (!rule?.enabled || !rule.pattern) return false;
+  try {
+    return new RegExp(rule.pattern, "i").test(target);
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -131,7 +155,7 @@ function slug(label) {
  * request looks ordinary. Paths are matched against both the raw value and a
  * best-effort URL-decoded copy so `%2e%2e/`-style tricks don't hide a rule.
  */
-export function classifyRequest(row) {
+export function classifyRequest(row, settings = null) {
   const rawPath = row?.path || "";
   let decodedPath = rawPath;
   try {
@@ -143,12 +167,23 @@ export function classifyRequest(row) {
 
   const seen = new Set();
   const tags = [];
-  for (const rule of RULES) {
+  for (const rule of BUILT_IN_RULES) {
+    if (!enabledBuiltInRule(rule, settings)) continue;
     if (seen.has(rule.label)) continue;
     const target = rule.scope === "ua" ? ua : `${rawPath} ${decodedPath}`;
     if (rule.test(target)) {
       seen.add(rule.label);
       tags.push({ id: slug(rule.label), label: rule.label, severity: rule.severity });
+    }
+  }
+  for (const rule of settings?.customRules || []) {
+    if (seen.has(rule.label)) continue;
+    const label = (rule.label || "").trim();
+    if (!label) continue;
+    const target = targetForRule(row, rule.scope || "url", rawPath, decodedPath);
+    if (customRuleMatches(rule, target)) {
+      seen.add(label);
+      tags.push({ id: rule.id || slug(label), label, severity: rule.severity === "high" ? "high" : "warn" });
     }
   }
   tags.sort((a, b) => (WEIGHT[b.severity] || 0) - (WEIGHT[a.severity] || 0));
@@ -161,7 +196,8 @@ export function classifyRequest(row) {
  * announcing itself — stealth bots that impersonate browsers can't be
  * caught by a header that never existed in the log line.
  */
-export function isLikelyBot(userAgent) {
+export function isLikelyBot(userAgent, settings = null) {
+  if (settings?.botDetectionEnabled === false) return false;
   if (!userAgent) return false;
-  return BOT_UA.some((re) => re.test(userAgent)) || RULES.some((r) => r.scope === "ua" && r.test(userAgent));
+  return BOT_UA.some((re) => re.test(userAgent)) || BUILT_IN_RULES.some((r) => enabledBuiltInRule(r, settings) && r.scope === "ua" && r.test(userAgent));
 }

@@ -44,10 +44,16 @@ pub struct SourceConfig {
     pub pattern: String,
     #[serde(default)]
     pub include_subfolders: bool,
+    #[serde(default = "default_log_format")]
+    pub log_format: String,
 }
 
 fn default_pattern() -> String {
     "access.log*".to_string()
+}
+
+fn default_log_format() -> String {
+    "apache_combined".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

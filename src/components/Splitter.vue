@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from "vue";
+import { onBeforeUnmount, ref } from "vue";
 import { useMonitorStore } from "../store/monitor";
 
 const props = defineProps({
@@ -22,6 +22,9 @@ function onPointerDown(event) {
   dragging.value = true;
   last.value = { x: event.clientX, y: event.clientY };
   event.currentTarget.setPointerCapture(event.pointerId);
+  window.addEventListener("pointermove", onPointerMove);
+  window.addEventListener("pointerup", endDrag);
+  window.addEventListener("pointercancel", endDrag);
 }
 
 function onPointerMove(event) {
@@ -34,7 +37,12 @@ function onPointerMove(event) {
 
 function endDrag() {
   dragging.value = false;
+  window.removeEventListener("pointermove", onPointerMove);
+  window.removeEventListener("pointerup", endDrag);
+  window.removeEventListener("pointercancel", endDrag);
 }
+
+onBeforeUnmount(endDrag);
 </script>
 
 <template>
@@ -49,5 +57,9 @@ function endDrag() {
     @pointerup="endDrag"
     @pointercancel="endDrag"
     @lostpointercapture="endDrag"
-  >···</div>
+  >
+    <span class="splitter-grip" aria-hidden="true">
+      <span></span><span></span><span></span>
+    </span>
+  </div>
 </template>

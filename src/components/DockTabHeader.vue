@@ -1,5 +1,5 @@
 <script setup>
-// The tab-strip that tops every dock (Sources, Access log/Traffic,
+// The tab-strip that tops every dock (Sources, Access log,
 // Error log/Query/Alerts, Inspector/History, and the single-tab docks like
 // Throughput). One component instead of copy-pasting this markup 7 times.
 //

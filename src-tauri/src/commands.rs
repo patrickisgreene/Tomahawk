@@ -23,6 +23,7 @@ pub struct AddSourceInput {
     pub path: String,
     pub pattern: Option<String>,
     pub include_subfolders: Option<bool>,
+    pub log_format: Option<String>,
 }
 
 #[tauri::command]
@@ -41,6 +42,7 @@ pub fn add_source(input: AddSourceInput) -> Result<SourceSummary, String> {
         path: input.path,
         pattern: input.pattern.unwrap_or_else(|| "access.log*".to_string()),
         include_subfolders: input.include_subfolders.unwrap_or(false),
+        log_format: input.log_format.unwrap_or_else(|| "apache_combined".to_string()),
     };
 
     // Fail fast if the path isn't readable, before it's persisted.
@@ -281,6 +283,7 @@ fn summarize(source: &SourceConfig) -> SourceSummary {
         kind,
         label: source.label.clone(),
         path: source.path.clone(),
+        log_format: source.log_format.clone(),
         row_count,
         last_ts,
         files,

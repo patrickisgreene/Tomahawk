@@ -68,6 +68,7 @@ pub struct SourceSummary {
     pub kind: String,
     pub label: String,
     pub path: String,
+    pub log_format: String,
     pub row_count: i64,
     pub last_ts: Option<i64>,
     pub files: Vec<SourceFileSummary>,

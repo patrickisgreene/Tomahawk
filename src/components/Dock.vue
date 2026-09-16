@@ -10,13 +10,17 @@ const props = defineProps({
 const store = useMonitorStore();
 
 const openIds = computed(() => store.dockTabs[props.dockId] || []);
+const validOpenIds = computed(() => openIds.value.filter((id) => PANEL_REGISTRY[id]));
 const tabs = computed(() =>
-  openIds.value.map((id) => {
+  validOpenIds.value.map((id) => {
     const meta = PANEL_REGISTRY[id];
     return { id, icon: meta.icon, label: meta.label, badge: meta.badge ? meta.badge(store) : null };
   })
 );
-const activeId = computed(() => store.dockActiveTab[props.dockId]);
+const activeId = computed(() => {
+  const current = store.dockActiveTab[props.dockId];
+  return PANEL_REGISTRY[current] ? current : validOpenIds.value[0] || null;
+});
 </script>
 
 <template>
@@ -31,6 +35,6 @@ const activeId = computed(() => store.dockActiveTab[props.dockId]);
       <template #trailing><slot name="trailing" /></template>
     </DockTabHeader>
     <div v-if="!openIds.length" class="insp-empty">No panels open — use <i class="ph ph-plus"></i> above to add one.</div>
-    <component :is="PANEL_REGISTRY[id].component" v-for="id in openIds" :key="id" v-show="id === activeId" />
+    <component :is="PANEL_REGISTRY[id].component" v-for="id in validOpenIds" :key="id" v-show="id === activeId" />
   </div>
 </template>

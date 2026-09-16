@@ -1,14 +1,10 @@
 <script setup>
 import { computed, ref, onMounted, onUnmounted } from "vue";
 import { useMonitorStore } from "../store/monitor";
-import { useRelativeTime } from "../composables/useRelativeTime";
-import { statusColor, fmtMs, fmtBytes, formatLocalTimestamp } from "../data/format";
+import { statusColor, fmtMs, fmtBytes, formatTimestamp } from "../data/format";
+import AppSelect from "./AppSelect.vue";
 
 const store = useMonitorStore();
-const syncedAgo = useRelativeTime(() => store.lastSyncedAt);
-const resyncMenu = ref(null);
-const intervals = [[10000, "Every 10 seconds"], [30000, "Every 30 seconds"], [60000, "Every minute"], [300000, "Every 5 minutes"]];
-const intervalLabel = computed(() => store.resyncIntervalMs < 60000 ? store.resyncIntervalMs / 1000 + "s" : store.resyncIntervalMs / 60000 + "m");
 const domains = computed(() => {
   const values = store.tailRows
     .filter((row) => !store.tailSourceId || row.id.startsWith(store.tailSourceId + ":"))
@@ -16,11 +12,32 @@ const domains = computed(() => {
   if (store.tailDomain) values.push(store.tailDomain);
   return [...new Set(values)].sort();
 });
-function closeResyncMenu(event) {
-  if (!resyncMenu.value?.contains(event.target)) resyncMenu.value?.removeAttribute("open");
-}
-onMounted(() => document.addEventListener("pointerdown", closeResyncMenu));
-onUnmounted(() => document.removeEventListener("pointerdown", closeResyncMenu));
+const sourceOptions = computed(() => [
+  { value: "", label: `All sources (${store.sources.length})` },
+  ...store.sources.map((source) => ({ value: source.id, label: source.label })),
+]);
+const domainOptions = computed(() => [
+  { value: "", label: "All domains" },
+  ...domains.value.map((domain) => ({ value: domain, label: domain })),
+]);
+const windowOptions = [
+  { value: 0, label: "All loaded times" },
+  { value: 900000, label: "Last 15m of log" },
+  { value: 3600000, label: "Last hour of log" },
+  { value: 86400000, label: "Last day of log" },
+];
+const limitOptions = [
+  { value: 400, label: "400 rows" },
+  { value: 1000, label: "1,000 rows" },
+  { value: 5000, label: "5,000 rows" },
+];
+const statusOptions = [
+  { value: 0, label: "All statuses" },
+  { value: 200, label: "Status >= 200" },
+  { value: 300, label: "Status >= 300" },
+  { value: 400, label: "Status >= 400" },
+  { value: 500, label: "Status >= 500" },
+];
 const loading = computed(() => store.tailLoading || (store.isSyncing && !store.tailRows.length));
 const columns = [
   ["timestamp", "Timestamp (local)", 220], ["ip", "Client", 160],
@@ -34,13 +51,18 @@ const columns = [
 ];
 const selectedColumns = ref(["timestamp", "ip", "hostname", "method", "status", "path", "bytes", "protocol"]);
 const visibleColumns = computed(() => columns.filter(([key]) => selectedColumns.value.includes(key)));
+const timestampLabel = computed(() => {
+  if (store.displayTimezone === "utc") return "Timestamp (UTC)";
+  if (store.displayTimezone === "source") return "Timestamp (source)";
+  return "Timestamp (local)";
+});
 const gridStyle = computed(() => ({
   gridTemplateColumns: visibleColumns.value.map(([, , width]) => `${width}px`).join(" "),
 }));
 function valueFor(row, key) {
   if (key === "bytes") return fmtBytes(row.bytes);
   if (key === "ms") return fmtMs(row.ms);
-  if (key === "timestamp") return formatLocalTimestamp(row.ts);
+  if (key === "timestamp") return formatTimestamp(row, store.displayTimezone);
   return row[key] || "-";
 }
 onMounted(async () => {
@@ -54,41 +76,11 @@ onUnmounted(() => store.stopAutoResync());
   <div class="panel-fill access-panel">
     <div class="toolbar access-toolbar">
       <div class="access-controls">
-      <select class="chip" aria-label="Source" v-model="store.tailSourceId">
-        <option value="">All sources ({{ store.sources.length }})</option>
-        <option v-for="source in store.sources" :key="source.id" :value="source.id">{{ source.label }}</option>
-      </select>
-      <details v-if="false" ref="resyncMenu" class="resync-picker">
-        <summary class="chip accent" aria-label="Resync settings">
-          <i class="ph" :class="store.isSyncing ? 'ph-spinner spin' : 'ph-arrows-clockwise'"></i>
-          {{ store.isSyncing ? "Syncing..." : "Resync · " + intervalLabel }}<i class="ph ph-caret-down"></i>
-        </summary>
-        <div class="resync-options">
-          <button class="chip accent" :disabled="store.isSyncing" @click="store.resyncNow()">{{ store.isSyncing ? "Syncing..." : "Resync now" }}</button>
-          <fieldset>
-            <legend>Automatic resync</legend>
-            <label v-for="[value, label] in intervals" :key="value">
-              <input type="radio" name="access-resync-interval" :value="value" :checked="store.resyncIntervalMs === value" @change="store.setResyncInterval(value)">{{ label }}
-            </label>
-          </fieldset>
-        </div>
-      </details>
-      <select class="chip" aria-label="Domain" v-model="store.tailDomain" title="Filter domains in loaded rows">
-        <option value="">All domains</option>
-        <option v-for="domain in domains" :key="domain" :value="domain">{{ domain }}</option>
-      </select>
-      <span class="synced-label">synced {{ syncedAgo }}</span>
-      <select class="chip" aria-label="Time window relative to newest loaded entry" v-model.number="store.tailWindowMs">
-        <option :value="0">All loaded times</option><option :value="900000">Last 15m of log</option>
-        <option :value="3600000">Last hour of log</option><option :value="86400000">Last day of log</option>
-      </select>
-      <select class="chip" aria-label="Loaded row limit" :disabled="loading || store.isSyncing" :value="store.tailLimit" @change="store.setTailLimit(Number($event.target.value))">
-        <option :value="400">400 rows</option><option :value="1000">1,000 rows</option><option :value="5000">5,000 rows</option>
-      </select>
-      <select class="chip" aria-label="Minimum status" v-model.number="store.tailMinStatus">
-        <option :value="0">All statuses</option><option :value="200">Status >= 200</option>
-        <option :value="300">Status >= 300</option><option :value="400">Status >= 400</option><option :value="500">Status >= 500</option>
-      </select>
+      <AppSelect v-model="store.tailSourceId" :options="sourceOptions" aria-label="Source" />
+      <AppSelect v-model="store.tailDomain" :options="domainOptions" aria-label="Domain" />
+      <AppSelect v-model="store.tailWindowMs" :options="windowOptions" aria-label="Time window relative to newest loaded entry" />
+      <AppSelect :model-value="store.tailLimit" :options="limitOptions" aria-label="Loaded row limit" :disabled="loading || store.isSyncing" @update:model-value="store.setTailLimit($event)" />
+      <AppSelect v-model="store.tailMinStatus" :options="statusOptions" aria-label="Minimum status" />
       </div>
       <div class="filterbar">
         <i class="ph ph-funnel"></i>
@@ -110,7 +102,7 @@ onUnmounted(() => store.stopAutoResync());
       <div class="access-table">
         <div class="tail-head" :style="gridStyle">
           <span v-for="[key, label] in visibleColumns" :key="key">
-            <button v-if="key === 'timestamp'" class="time-sort" @click="store.toggleSort()">{{ label }}<i class="ph" :class="store.tailSortDesc ? 'ph-caret-down' : 'ph-caret-up'"></i></button>
+            <button v-if="key === 'timestamp'" class="time-sort" @click="store.toggleSort()">{{ timestampLabel }}<i class="ph" :class="store.tailSortDesc ? 'ph-caret-down' : 'ph-caret-up'"></i></button>
             <template v-else>{{ label }}</template>
           </span>
         </div>

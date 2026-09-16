@@ -1,6 +1,7 @@
 <script setup>
 import { onMounted } from "vue";
 import { useMonitorStore } from "../store/monitor";
+import AppSelect from "./AppSelect.vue";
 
 const store = useMonitorStore();
 
@@ -20,14 +21,20 @@ function barHeight(i) {
 function barColor(i) {
   return i > 10 ? "var(--color-accent-600)" : "var(--color-accent-800)";
 }
+
+function fieldOptions() {
+  return store.queryFields.map((field) => ({ value: field.id, label: field.label }));
+}
+
+function operatorOptions(fieldId) {
+  return store.operatorsForField(fieldId).map((operator) => ({ value: operator.id, label: operator.label }));
+}
 </script>
 
 <template>
   <div class="panel-fill">
     <div class="query-row">
-      <i class="ph ph-caret-right" style="color:var(--color-neutral-600)"></i>
-      <i class="ph ph-play" style="color:var(--color-accent-300)"></i>
-      <i class="ph ph-stop" style="color:var(--color-neutral-600)"></i>
+      <i class="ph ph-database" style="color:var(--color-accent-300)"></i>
       <div class="sep"></div>
       <input
         class="query-name-input"
@@ -44,22 +51,20 @@ function barColor(i) {
     <div class="query-body">
       <div v-for="(condition, i) in store.queryConditions" :key="condition.id" class="cond-row">
         <span class="cond-label" :class="{ and: i > 0 }">{{ i === 0 ? "Where" : "and" }}</span>
-        <select
+        <AppSelect
           class="cond-field"
-          :value="condition.field"
-          @change="store.updateQueryCondition(condition.id, { field: $event.target.value })"
-        >
-          <option v-for="field in store.queryFields" :key="field.id" :value="field.id">{{ field.label }}</option>
-        </select>
-        <select
+          :model-value="condition.field"
+          :options="fieldOptions()"
+          aria-label="Query field"
+          @update:model-value="store.updateQueryCondition(condition.id, { field: $event })"
+        />
+        <AppSelect
           class="cond-field cond-op"
-          :value="condition.operator"
-          @change="store.updateQueryCondition(condition.id, { operator: $event.target.value })"
-        >
-          <option v-for="operator in store.operatorsForField(condition.field)" :key="operator.id" :value="operator.id">
-            {{ operator.label }}
-          </option>
-        </select>
+          :model-value="condition.operator"
+          :options="operatorOptions(condition.field)"
+          aria-label="Query operator"
+          @update:model-value="store.updateQueryCondition(condition.id, { operator: $event })"
+        />
         <input
           class="cond-value"
           :value="condition.value"

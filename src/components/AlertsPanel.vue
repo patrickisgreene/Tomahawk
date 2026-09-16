@@ -5,7 +5,7 @@ import { classifyRequest } from "../data/classification";
 const store = useMonitorStore();
 const alerts = computed(() => {
   const groups = new Map();
-  for (const row of store.tailRows) for (const tag of classifyRequest(row)) {
+  for (const row of store.tailRows) for (const tag of classifyRequest(row, store.localRules)) {
     const item = groups.get(tag.id) || { ...tag, count: 0 };
     item.count++; groups.set(tag.id, item);
   }

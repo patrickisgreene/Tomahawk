@@ -25,13 +25,28 @@ function pad2(n) {
   return String(n).padStart(2, "0");
 }
 
-// Use the absolute timestamp and the computer\'s timezone (including DST).
-export function formatLocalTimestamp(ts) {
+function formatDateParts(date, utc) {
+  const year = utc ? date.getUTCFullYear() : date.getFullYear();
+  const month = (utc ? date.getUTCMonth() : date.getMonth()) + 1;
+  const day = utc ? date.getUTCDate() : date.getDate();
+  const hours = utc ? date.getUTCHours() : date.getHours();
+  const minutes = utc ? date.getUTCMinutes() : date.getMinutes();
+  const seconds = utc ? date.getUTCSeconds() : date.getSeconds();
+  return `${year}-${pad2(month)}-${pad2(day)} ${pad2(hours)}:${pad2(minutes)}:${pad2(seconds)}`;
+}
+
+// Keep one fixed timestamp shape while switching which timezone supplies
+// the date/time parts. `source` returns the original log timestamp string.
+export function formatTimestamp(rowOrTs, mode = "local") {
+  if (mode === "source" && rowOrTs && typeof rowOrTs === "object") return rowOrTs.timestamp || "-";
+  const ts = rowOrTs && typeof rowOrTs === "object" ? rowOrTs.ts : rowOrTs;
   if (ts == null || !Number.isFinite(ts)) return "-";
   const date = new Date(ts);
   if (!Number.isFinite(date.getTime())) return "-";
-  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())} ${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`;
+  return formatDateParts(date, mode === "utc");
 }
+
+export const formatLocalTimestamp = (ts) => formatTimestamp(ts, "local");
 
 export function nowClock(withMs) {
   const d = new Date();

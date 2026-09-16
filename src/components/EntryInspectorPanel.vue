@@ -61,8 +61,8 @@ const asnText = computed(() => {
 
 // URL-pattern classifications for the selected request — tags describe what
 // the request looks like, never that an exploit succeeded.
-const classification = computed(() => (r.value ? classifyRequest(r.value) : []));
-const isBot = computed(() => (r.value ? isLikelyBot(r.value.userAgent || info.value?.ua) : false));
+const classification = computed(() => (r.value ? classifyRequest(r.value, store.localRules) : []));
+const isBot = computed(() => (r.value ? isLikelyBot(r.value.userAgent || info.value?.ua, store.localRules) : false));
 
 // Split the raw log line into plain/highlighted segments so the status
 // code can be colored without resorting to v-html. Real rows carry their

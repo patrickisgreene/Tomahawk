@@ -1,5 +1,4 @@
 import AccessLogPanel from "../components/AccessLogPanel.vue";
-import TrafficPanel from "../components/TrafficPanel.vue";
 import QueryPanel from "../components/QueryPanel.vue";
 import AlertsPanel from "../components/AlertsPanel.vue";
 import EntryInspectorPanel from "../components/EntryInspectorPanel.vue";
@@ -14,7 +13,6 @@ import SavedFiltersPanel from "../components/SavedFiltersPanel.vue";
 // (src/data/mock.js) and in each dock's `dockTabs` list (store/monitor.js).
 export const PANEL_REGISTRY = {
   access: { icon: "ph-table", label: "Access log", component: AccessLogPanel },
-  traffic: { icon: "ph-chart-line", label: "Traffic", component: TrafficPanel },
   query: { icon: "ph-funnel", label: "Query", component: QueryPanel },
   alerts: { icon: "ph-bell-ringing", label: "Alerts", component: AlertsPanel },
   inspector: { icon: "ph-magnifying-glass-plus", label: "Inspector", component: EntryInspectorPanel },

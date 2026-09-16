@@ -59,3 +59,21 @@ test("normal traffic stays untagged", () => {
   assert.deepEqual(classifyRequest(row("/products?page=3&sort=price")), []);
   assert.deepEqual(classifyRequest(row("/checkout/confirm?cart=8f21a")), []);
 });
+
+test("local settings can disable built-in classifiers", () => {
+  assert.deepEqual(classifyRequest(row("/.env"), { builtInEnabled: false }), []);
+  assert.deepEqual(classifyRequest(row("/.env"), { disabledBuiltInRuleIds: ["config-probe"] }), []);
+});
+
+test("local settings can disable bot detection", () => {
+  assert.equal(isLikelyBot("Googlebot/2.1", { botDetectionEnabled: false }), false);
+});
+
+test("custom local rules classify matching rows", () => {
+  const tags = classifyRequest(row("/admin/acme-health", "Browser"), {
+    customRules: [
+      { id: "local-acme", label: "Acme admin probe", scope: "url", pattern: "acme-health", severity: "high", enabled: true },
+    ],
+  });
+  assert.ok(tags.some((tag) => tag.id === "local-acme" && tag.severity === "high"));
+});

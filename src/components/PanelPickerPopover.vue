@@ -23,7 +23,6 @@ const panelCount = computed(() => store.panelCatalog.reduce((n, g) => n + g.item
         @input="store.setPanelPickerQuery($event.target.value)"
         placeholder="Search panels…"
       >
-      <span class="kbd-hint">esc</span>
     </div>
     <div class="popover-list">
       <template v-for="group in store.filteredPanelCatalog" :key="group.group">
@@ -45,8 +44,6 @@ const panelCount = computed(() => store.panelCatalog.reduce((n, g) => n + g.item
       <div v-if="!store.filteredPanelCatalog.length" class="insp-empty">No panels match.</div>
     </div>
     <div class="popover-foot">
-      <span><span class="kbd-hint-inline">↑↓</span> navigate</span>
-      <span><span class="kbd-hint-inline">↵</span> add here</span>
       <span style="margin-left:auto">{{ panelCount }} panels</span>
     </div>
   </div>
