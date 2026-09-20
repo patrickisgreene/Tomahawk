@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from "vue";
+import { computed, onMounted, onUnmounted } from "vue";
 import { useMonitorStore } from "./store/monitor";
 import TopBar from "./components/TopBar.vue";
 import StatusBar from "./components/StatusBar.vue";
@@ -12,6 +12,7 @@ import PanelPickerPopover from "./components/PanelPickerPopover.vue";
 import AddSourceDialog from "./components/AddSourceDialog.vue";
 import SettingsDialog from "./components/SettingsDialog.vue";
 import GlobalSearchPalette from "./components/GlobalSearchPalette.vue";
+import GlobalContextMenu from "./components/GlobalContextMenu.vue";
 
 const store = useMonitorStore();
 const PAGES = {
@@ -22,6 +23,19 @@ const PAGES = {
   hosts: HostsPage,
 };
 const currentPageComponent = computed(() => PAGES[store.currentPage] || MonitorPage);
+
+// Disables the native right-click menu app-wide. Anything with its own
+// contextmenu handler (currently just log rows — see AccessLogPanel.vue)
+// already calls preventDefault() itself, so by the time the event bubbles
+// here `defaultPrevented` is true and this leaves it alone; everywhere else
+// gets the fallback GlobalContextMenu instead.
+function onContextMenu(event) {
+  if (event.defaultPrevented) return;
+  event.preventDefault();
+  store.openGlobalContextMenu(event.clientX, event.clientY);
+}
+onMounted(() => document.addEventListener("contextmenu", onContextMenu));
+onUnmounted(() => document.removeEventListener("contextmenu", onContextMenu));
 </script>
 
 <template>
@@ -34,5 +48,6 @@ const currentPageComponent = computed(() => PAGES[store.currentPage] || MonitorP
     <AddSourceDialog v-if="store.showAddSourceDialog" />
     <SettingsDialog v-if="store.showSettingsDialog" />
     <GlobalSearchPalette v-if="store.showGlobalSearch" />
+    <GlobalContextMenu v-if="store.globalContextMenu" />
   </div>
 </template>

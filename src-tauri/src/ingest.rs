@@ -126,6 +126,7 @@ pub fn ingest_access_file(conn: &mut Connection, source_id: &str, path: &Path) -
                 referer: parsed.referer,
                 user_agent: parsed.user_agent,
                 raw,
+                tags: Vec::new(), // freshly ingested row — can't have tags yet
             });
             Ok(())
         };

@@ -40,7 +40,7 @@ function confirmRemove() {
     <div class="tree">
       <div v-if="!store.filteredSources.length" class="tree-row dim">No sources added yet.</div>
       <template v-for="source in store.filteredSources" :key="source.id">
-        <div class="tree-row" @click="onRowClick(source)">
+        <div class="tree-row" :class="{ hidden: source.hidden }" @click="onRowClick(source)">
           <i
             v-if="source.kind === 'directory' && source.files.length"
             class="ph"
@@ -51,7 +51,15 @@ function confirmRemove() {
           <span class="count">{{ source.rowCount }} rows</span>
           <span v-if="source.lastTs" class="lag">{{ formatRelative(source.lastTs) }}</span>
           <span v-if="store.isSourceLoading(source.id)" class="loading-hint"><i class="ph ph-spinner spin"></i>loading</span>
-          <span class="row-actions"><i class="ph ph-trash" title="Remove source" @click.stop="onRemove(source)"></i></span>
+          <span class="row-actions">
+            <i
+              class="ph"
+              :class="source.hidden ? 'ph-eye-slash' : 'ph-eye'"
+              :title="source.hidden ? 'Hidden from the log — click to show' : 'Hide from the log'"
+              @click.stop="store.setSourceHidden(source.id, !source.hidden)"
+            ></i>
+            <i class="ph ph-trash" title="Remove source" @click.stop="onRemove(source)"></i>
+          </span>
         </div>
         <div
           v-if="source.kind === 'directory' && source.files.length"

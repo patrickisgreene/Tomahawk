@@ -38,6 +38,16 @@ CREATE TABLE IF NOT EXISTS cursors (
   mtime INTEGER NOT NULL,
   done INTEGER NOT NULL DEFAULT 0
 );
+
+-- User-assigned tags on individual rows. `tag` is always stored lowercased
+-- (the UI never shows casing variants of the same tag), keyed by the local
+-- access_rows.id — no FOREIGN KEY, matching the rest of this schema.
+CREATE TABLE IF NOT EXISTS row_tags (
+  row_id INTEGER NOT NULL,
+  tag TEXT NOT NULL,
+  PRIMARY KEY (row_id, tag)
+);
+CREATE INDEX IF NOT EXISTS idx_row_tags_tag ON row_tags(tag);
 ";
 
 /// Opens (creating if needed) the SQLite database that belongs to one

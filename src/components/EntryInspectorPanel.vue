@@ -16,6 +16,7 @@ const draggedInspectorSection = ref(null);
 const dragOverInspectorSection = ref(null);
 const inspectorSections = [
   { id: "logged", label: "Log fields" },
+  { id: "tags", label: "Tags" },
   { id: "request", label: "Request" },
   { id: "client", label: "Client" },
   { id: "timing", label: "Response & timing" },
@@ -140,6 +141,14 @@ function filterByEntry() {
   ];
 }
 
+const newTag = ref("");
+function addTag() {
+  const tag = newTag.value.trim();
+  if (!tag || !r.value) return;
+  store.addRowTag(r.value.id, tag);
+  newTag.value = "";
+}
+
 watch(
   () => r.value?.ip,
   (ip) => {
@@ -217,6 +226,25 @@ watch(
           <div v-if="shouldShow(r.referer)" class="insp-field"><span class="k">Referer</span><div class="v" style="white-space:normal;overflow-wrap:anywhere">{{ hasValue(r.referer) ? r.referer : "-" }}</div></div>
           <div v-if="shouldShow(r.bytes)" class="insp-field"><span class="k">Response bytes</span><div class="v" style="white-space:normal;overflow-wrap:anywhere">{{ hasValue(r.bytes) ? r.bytes : "-" }}</div></div>
           <div v-if="shouldShow(r.filePath)" class="insp-field"><span class="k">Source file</span><div class="v" style="white-space:normal;overflow-wrap:anywhere">{{ hasValue(r.filePath) ? r.filePath : "-" }}</div></div>
+        </template>
+      </div>
+      <div class="inspector-section-block" :style="{ order: sectionOrder('tags') }">
+        <div class="insp-section-hd" @click="toggle('tags')">
+          <i class="ph" :class="collapsed.tags ? 'ph-caret-right' : 'ph-caret-down'"></i>
+          <i class="ph ph-tag" style="color:var(--color-accent-400)"></i>Tags
+        </div>
+        <template v-if="!collapsed.tags">
+          <div class="ctx-tags" style="padding:6px">
+            <span v-for="tag in r.tags || []" :key="tag" class="insp-tag insp-tag-editable">
+              {{ tag }}
+              <i class="ph ph-x" title="Remove tag" @click="store.removeRowTag(r.id, tag)"></i>
+            </span>
+            <span v-if="!(r.tags || []).length" class="ctx-tags-empty">No tags yet</span>
+          </div>
+          <div class="ctx-tag-add" style="padding:0 6px 6px">
+            <input v-model="newTag" placeholder="Add a tag…" maxlength="40" @keydown.enter="addTag">
+            <button class="icon-btn" :disabled="!newTag.trim()" title="Add tag" @click="addTag"><i class="ph ph-plus"></i></button>
+          </div>
         </template>
       </div>
       <div class="inspector-section-block" :style="{ order: sectionOrder('request') }">

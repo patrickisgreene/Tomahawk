@@ -5,7 +5,7 @@ import {
   panelCatalog, statusBarsData,
 } from "../data/mock";
 import { createLogSource, isTauri, pullFile } from "../data/logSource";
-import { listLocalDir, addSource as addSourceApi, removeSource as removeSourceApi, listSources, getSourceStats, listQueryFields, queryRows as queryRowsApi, listDomains as listDomainsApi } from "../data/sourcesApi";
+import { listLocalDir, addSource as addSourceApi, removeSource as removeSourceApi, setSourceHidden as setSourceHiddenApi, listSources, getSourceStats, listQueryFields, queryRows as queryRowsApi, listDomains as listDomainsApi, listTags as listTagsApi, addRowTag as addRowTagApi, removeRowTag as removeRowTagApi } from "../data/sourcesApi";
 import { geoipStatus, lookupGeoip, reverseDns, lookupNetworkDetails } from "../data/geoipApi";
 import { joinLocalPath, localPathCrumbs } from "../data/localPath";
 
@@ -77,10 +77,27 @@ const PANEL_SIZE_LIMITS = {
 };
 const DEFAULT_ACCESS_COLUMN_ORDER = [
   "timestamp", "ip", "hostname", "method", "status", "path", "bytes", "protocol",
-  "referer", "userAgent", "forwardedFor", "ident", "authUser", "request", "filePath", "ms",
+  "referer", "userAgent", "forwardedFor", "ident", "authUser", "request", "filePath", "ms", "tags",
 ];
-const DEFAULT_ACCESS_VISIBLE_COLUMNS = ["timestamp", "ip", "hostname", "method", "status", "path", "bytes", "protocol"];
-const DEFAULT_INSPECTOR_SECTION_ORDER = ["logged", "request", "client", "timing", "raw"];
+const DEFAULT_ACCESS_VISIBLE_COLUMNS = ["timestamp", "ip", "hostname", "method", "status", "path", "bytes", "protocol", "tags"];
+// Default pixel widths, keyed the same as DEFAULT_ACCESS_COLUMN_ORDER — the
+// starting point for drag-to-resize, overridden per-column in
+// accessColumnLayout.widths once the user resizes a header.
+const DEFAULT_ACCESS_COLUMN_WIDTHS = {
+  timestamp: 220, ip: 160, hostname: 180, method: 70, status: 60, path: 340,
+  bytes: 75, protocol: 90, referer: 240, userAgent: 300, forwardedFor: 180,
+  ident: 100, authUser: 150, request: 340, filePath: 300, ms: 90, tags: 180,
+};
+const ACCESS_COLUMN_WIDTH_LIMITS = { min: 50, max: 800 };
+// Standard HTTP verbs offered by the Method filter dropdown, plus the
+// sentinel sent to the backend (and used client-side in dev preview) for
+// "any method outside this list" — mirrors STANDARD_HTTP_METHODS in
+// src-tauri/src/commands.rs.
+export const STANDARD_HTTP_METHODS = ["GET", "HEAD", "POST", "PUT", "DELETE", "CONNECT", "OPTIONS", "TRACE", "PATCH"];
+export const NONSTANDARD_METHOD_VALUE = "__nonstandard__";
+// Query fields that sort/compare numerically rather than as text.
+const NUMERIC_SORT_FIELDS = new Set(["ts", "status", "bytes", "ms"]);
+const DEFAULT_INSPECTOR_SECTION_ORDER = ["logged", "tags", "request", "client", "timing", "raw"];
 const QUERY_FIELDS = [
   { id: "time", label: "time", type: "text" },
   { id: "ts", label: "ts", type: "number" },
@@ -110,7 +127,20 @@ function normalizeAccessColumnLayout(layout) {
   ];
   const inputVisible = Array.isArray(layout?.visible) ? layout.visible : DEFAULT_ACCESS_VISIBLE_COLUMNS;
   const visible = inputVisible.filter((key) => order.includes(key));
-  return { order, visible: visible.length ? visible : [order[0]] };
+  const inputWidths = layout?.widths && typeof layout.widths === "object" ? layout.widths : {};
+  const widths = {};
+  for (const key of order) {
+    const limits = ACCESS_COLUMN_WIDTH_LIMITS;
+    const value = Number(inputWidths[key]);
+    widths[key] = Number.isFinite(value)
+      ? Math.max(limits.min, Math.min(limits.max, value))
+      : DEFAULT_ACCESS_COLUMN_WIDTHS[key] || 120;
+  }
+  // Columns the user has explicitly drag-resized: these are excluded from
+  // auto-fit-to-content so a manual choice isn't silently overwritten.
+  const inputResized = Array.isArray(layout?.resized) ? layout.resized : [];
+  const resized = inputResized.filter((key) => order.includes(key));
+  return { order, visible: visible.length ? visible : [order[0]], widths, resized };
 }
 
 function normalizeInspectorSectionOrder(order) {
@@ -167,6 +197,52 @@ function persistPanelSizes(sizes) {
   window.localStorage.setItem(PANEL_SIZES_KEY, JSON.stringify(sizes));
 }
 
+// Mirrors the backend's domain_www_mode matching (see build_box_filters in
+// commands.rs) for the browser dev-preview's client-side filter path, so a
+// shared-hosting log's bare/"www." hostname pairs behave the same in both.
+function matchesDomain(hostname, domain, includeWww, onlyWww) {
+  const host = (hostname || "").toLowerCase();
+  const root = domain.toLowerCase();
+  if (onlyWww) return host === `www.${root}`;
+  if (includeWww) return host === root || host === `www.${root}`;
+  return host === root;
+}
+
+// Escapes regex metacharacters so a literal string (e.g. a row's path) can
+// be dropped into a custom alert rule's pattern and match only itself.
+function escapeRegexLiteral(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Mirrors the backend's free-text search matching (see build_box_filters /
+// parse_text_filter in commands.rs) for the browser dev-preview's
+// client-side filter path: a leading "!" negates the match, and the two
+// toggles switch between plain substring and regex, case-insensitive or not.
+function matchesFreeText(row, rawText, regexMode, caseSensitive) {
+  const raw = rawText.trim();
+  if (!raw) return true;
+  const negate = raw.startsWith("!");
+  const needle = (negate ? raw.slice(1) : raw).trim();
+  if (!needle) return true;
+  let test;
+  if (regexMode) {
+    let re;
+    try {
+      re = new RegExp(needle, caseSensitive ? "" : "i");
+    } catch {
+      return true; // invalid regex mid-typing — don't hide every row while the user finishes it
+    }
+    test = (value) => re.test(String(value ?? ""));
+  } else if (caseSensitive) {
+    test = (value) => String(value ?? "").includes(needle);
+  } else {
+    const lower = needle.toLowerCase();
+    test = (value) => String(value ?? "").toLowerCase().includes(lower);
+  }
+  const matched = Object.values(row).some(test);
+  return negate ? !matched : matched;
+}
+
 function defaultQueryCondition() {
   return { id: `cond_${Date.now()}_${Math.random().toString(16).slice(2)}`, field: "status", operator: ">=", value: "400" };
 }
@@ -208,6 +284,19 @@ function conditionMatches(row, condition, fields = QUERY_FIELDS) {
   return false;
 }
 
+// Browser dev-preview equivalent of the backend's compare_rows: orders two
+// mock rows by one field (numeric fields compare numerically, everything
+// else case-insensitively), for the client-side sort applied when there's no
+// real SQL database to push the ORDER BY into.
+function compareByField(a, b, field, desc) {
+  const av = a[field];
+  const bv = b[field];
+  const cmp = NUMERIC_SORT_FIELDS.has(field)
+    ? (Number(av) || 0) - (Number(bv) || 0)
+    : String(av ?? "").toLowerCase().localeCompare(String(bv ?? "").toLowerCase());
+  return desc ? -cmp : cmp;
+}
+
 export const useMonitorStore = defineStore("monitor", {
   state: () => ({
     // ---- top-level navigation ----
@@ -225,6 +314,10 @@ export const useMonitorStore = defineStore("monitor", {
     tailLoading: false,
     selectedRowId: null,
     tailFilterText: "",
+    // Search box modifiers: a leading "!" in tailFilterText always negates
+    // the match. These two toggle how the rest of the text is matched.
+    tailFilterCaseSensitive: false,
+    tailFilterRegex: false,
     // The table is an infinite scroll over the whole database: every query
     // (search box, source/domain/window/status filters, query-builder
     // conditions) runs in SQL against *all* rows. `tailRows` is only the
@@ -241,12 +334,31 @@ export const useMonitorStore = defineStore("monitor", {
     panelSizes: loadPanelSizes(),
     tailSourceId: "",
     tailDomain: "",
+    // Domain filter www-merging: shared-hosting logs often carry a domain
+    // both bare and as "www.<domain>". `tailIncludeWww` (default on) widens
+    // a domain pick to match both; `tailOnlyWww` narrows it to just the
+    // "www." form. Mutually exclusive — see setTailIncludeWww/setTailOnlyWww.
+    tailIncludeWww: true,
+    tailOnlyWww: false,
     tailWindowMs: 0,
     tailMinStatus: 0,
+    tailMethod: "", // "" | one of STANDARD_HTTP_METHODS | NONSTANDARD_METHOD_VALUE
+    tailTag: "", // "" | a tag returned by refreshTags()
+    tailSortBy: "ts", // a query field id (see QUERY_FIELDS), or "ts" for the timestamp column
     tailSortDesc: true, // newest first, matches the design's default caret
     // Distinct hostnames on disk (for the domain filter dropdown), refreshed
     // from the database after sync / source changes.
     domains: [],
+    // Distinct tags in use (for the Tag filter dropdown), refreshed the same
+    // way as `domains`.
+    tags: [],
+    // { rowId, x, y } | null — the access-log row context menu, positioned
+    // at the cursor. Right-clicking a row also selects it (openRowContextMenu).
+    rowContextMenu: null,
+    // { x, y } | null — the fallback context menu shown when right-clicking
+    // anywhere that isn't a log row (the native context menu is disabled
+    // app-wide; see App.vue's document-level "contextmenu" listener).
+    globalContextMenu: null,
     accessColumnLayout: normalizeAccessColumnLayout(),
     resyncIntervalMs: 1800000,
     lastSyncedAt: Date.now(),
@@ -268,6 +380,12 @@ export const useMonitorStore = defineStore("monitor", {
 
     // ---- top talkers ----
     talkerKind: "clients",
+
+    // ---- status panel (Mix / Total tabs) ----
+    statusPanelTab: "mix",
+
+    // ---- method panel (Mix / Total tabs) ----
+    methodPanelTab: "mix",
 
     // ---- query builder / bottom dock ----
     queryConditions: [],
@@ -300,7 +418,7 @@ export const useMonitorStore = defineStore("monitor", {
       sources: ["sources", "saved"],
       talkers: [],
       throughput: ["talkers", "throughput"],
-      mix: ["mix"],
+      mix: ["mix", "methods"],
     },
     dockActiveTab: {
       stream: "access",
@@ -369,17 +487,20 @@ export const useMonitorStore = defineStore("monitor", {
       if (isTauri()) return state.tailRows;
       // Browser dev preview: no real database; apply the old client-side
       // filtering so the mock seed rows still respond to the toolbar.
-      const q = state.tailFilterText.trim().toLowerCase();
       const sourceRows = state.tailRows.filter((r) => !state.tailSourceId || r.id.startsWith(`${state.tailSourceId}:`));
       const latest = sourceRows.reduce((ts, r) => Math.max(ts, r.ts || 0), 0);
       const rows = sourceRows.filter((r) =>
-        (!state.tailDomain || r.hostname?.toLowerCase() === state.tailDomain) &&
+        (!state.tailDomain || matchesDomain(r.hostname, state.tailDomain, state.tailIncludeWww, state.tailOnlyWww)) &&
         (!state.tailWindowMs || r.ts >= latest - state.tailWindowMs) &&
         r.status >= state.tailMinStatus &&
-        (!q || Object.values(r).some((value) => String(value ?? "").toLowerCase().includes(q)))
+        (!state.tailMethod || (state.tailMethod === NONSTANDARD_METHOD_VALUE
+          ? !STANDARD_HTTP_METHODS.includes(String(r.method || "").toUpperCase())
+          : String(r.method || "").toUpperCase() === state.tailMethod)) &&
+        (!state.tailTag || (r.tags || []).some((t) => t.toLowerCase() === state.tailTag.toLowerCase())) &&
+        matchesFreeText(r, state.tailFilterText, state.tailFilterRegex, state.tailFilterCaseSensitive)
       );
       const queried = rows.filter((r) => state.queryConditions.every((c) => conditionMatches(r, c, state.queryFieldList)));
-      return state.tailSortDesc ? queried.slice().reverse() : queried;
+      return queried.slice().sort((a, b) => compareByField(a, b, state.tailSortBy, state.tailSortDesc));
     },
     queryTotalRows(state) {
       // "of N" in the query panel: rows in the involved sources, regardless
@@ -471,6 +592,35 @@ export const useMonitorStore = defineStore("monitor", {
         c5: { count: counts.c5, pct: pct(counts.c5), rate: rate(counts.c5) },
       };
     },
+    // Same shape as statusMixStats, split by HTTP method instead of status
+    // class. Only GET/POST/PUT get their own bucket — real traffic is
+    // overwhelmingly those three plus a long tail (DELETE/PATCH/HEAD/
+    // OPTIONS/...), and a pie chart needs everything it plots to stay
+    // pairwise distinct under color-blindness simulation (see the --cat-*
+    // comment in app.css), which caps a categorical chart at 3 hues here.
+    methodMixStats(state) {
+      const rows = state.tailRows;
+      const counts = { get: 0, post: 0, put: 0, other: 0 };
+      for (const r of rows) {
+        const method = String(r.method || "").toUpperCase();
+        if (method === "GET") counts.get++;
+        else if (method === "POST") counts.post++;
+        else if (method === "PUT") counts.put++;
+        else counts.other++;
+      }
+      const total = rows.length;
+      const pct = (n) => (total ? (n / total) * 100 : 0);
+      const spanSec = total > 1 ? Math.max(1, (rows[total - 1].ts - rows[0].ts) / 1000) : 1;
+      const rate = (n) => n / spanSec;
+      return {
+        total,
+        spanSec,
+        get: { count: counts.get, pct: pct(counts.get), rate: rate(counts.get) },
+        post: { count: counts.post, pct: pct(counts.post), rate: rate(counts.post) },
+        put: { count: counts.put, pct: pct(counts.put), rate: rate(counts.put) },
+        other: { count: counts.other, pct: pct(counts.other), rate: rate(counts.other) },
+      };
+    },
     // Ranked clients/paths/agents/referrers over the same recent-activity
     // window as throughputStats/statusMixStats — real counts from tailRows.
     topTalkers(state) {
@@ -539,8 +689,18 @@ export const useMonitorStore = defineStore("monitor", {
       this.history.unshift({ id: r.id, time: r.time, status: r.status, method: r.method, path: r.path, viewedAt: Date.now() });
       if (this.history.length > MAX_HISTORY) this.history.length = MAX_HISTORY;
     },
-    toggleSort() {
-      this.tailSortDesc = !this.tailSortDesc;
+    // Clicking a column header: toggle direction if it's already the active
+    // sort column, otherwise switch to it with a sensible default direction
+    // (newest/largest first for numeric columns, A-Z for text columns).
+    // `key` is a table column key ("timestamp" maps to the backend's "ts").
+    setSort(key) {
+      const field = key === "timestamp" ? "ts" : key;
+      if (this.tailSortBy === field) {
+        this.tailSortDesc = !this.tailSortDesc;
+      } else {
+        this.tailSortBy = field;
+        this.tailSortDesc = NUMERIC_SORT_FIELDS.has(field);
+      }
       this._refreshQuerySoon(0);
     },
     // ---- SQL-backed table query ----
@@ -548,9 +708,14 @@ export const useMonitorStore = defineStore("monitor", {
       return {
         sourceId: this.tailSourceId || null,
         domain: this.tailDomain || null,
+        domainWwwMode: this.tailOnlyWww ? "wwwOnly" : this.tailIncludeWww ? "merge" : "exact",
         minStatus: this.tailMinStatus || 0,
+        method: this.tailMethod || null,
+        tag: this.tailTag || null,
         windowMs: this.tailWindowMs || 0,
         text: this.tailFilterText.trim() || null,
+        textCaseSensitive: this.tailFilterCaseSensitive,
+        textRegex: this.tailFilterRegex,
         conditions: this.queryConditions.map((c) => ({ field: c.field, operator: c.operator, value: c.value })),
       };
     },
@@ -578,7 +743,7 @@ export const useMonitorStore = defineStore("monitor", {
       this.queryLoading = true;
       let result = null;
       try {
-        result = await queryRowsApi(this._queryInput(), this.tailSortDesc, 0, this.queryPageSize);
+        result = await queryRowsApi(this._queryInput(), this.tailSortBy, this.tailSortDesc, 0, this.queryPageSize);
       } catch (error) {
         if (!this.isSyncing) this.syncError = `Could not query log rows: ${String(error)}`;
       } finally {
@@ -601,7 +766,7 @@ export const useMonitorStore = defineStore("monitor", {
       this.queryLoading = true;
       let result = null;
       try {
-        result = await queryRowsApi(this._queryInput(), this.tailSortDesc, this.queryOffset, this.queryPageSize);
+        result = await queryRowsApi(this._queryInput(), this.tailSortBy, this.tailSortDesc, this.queryOffset, this.queryPageSize);
       } catch (error) {
         if (!this.isSyncing) this.syncError = `Could not load more rows: ${String(error)}`;
       }
@@ -686,13 +851,33 @@ togglePanel(side) {
       this.tailFilterText = text;
       this._refreshQuerySoon(300);
     },
+    setTailFilterCaseSensitive(value) {
+      this.tailFilterCaseSensitive = value;
+      this._refreshQuerySoon(0);
+    },
+    setTailFilterRegex(value) {
+      this.tailFilterRegex = value;
+      this._refreshQuerySoon(0);
+    },
     setTailSource(sourceId) {
       this.tailSourceId = sourceId;
       this._refreshQuerySoon(0);
       this.refreshDomains();
+      this.refreshTags();
     },
     setTailDomain(domain) {
       this.tailDomain = domain;
+      this._refreshQuerySoon(0);
+    },
+    // The two are mutually exclusive: turning one on turns the other off.
+    setTailIncludeWww(value) {
+      this.tailIncludeWww = value;
+      if (value) this.tailOnlyWww = false;
+      this._refreshQuerySoon(0);
+    },
+    setTailOnlyWww(value) {
+      this.tailOnlyWww = value;
+      if (value) this.tailIncludeWww = false;
       this._refreshQuerySoon(0);
     },
     setTailWindow(windowMs) {
@@ -702,6 +887,81 @@ togglePanel(side) {
     setTailMinStatus(minStatus) {
       this.tailMinStatus = minStatus;
       this._refreshQuerySoon(0);
+    },
+    setTailMethod(method) {
+      this.tailMethod = method;
+      this._refreshQuerySoon(0);
+    },
+    setTailTag(tag) {
+      this.tailTag = tag;
+      this._refreshQuerySoon(0);
+    },
+    // ---- row tags ----
+    async refreshTags() {
+      if (!isTauri()) {
+        const set = new Set();
+        for (const r of this.tailRows) for (const t of r.tags || []) set.add(t);
+        this.tags = [...set].sort();
+        return;
+      }
+      try {
+        this.tags = (await listTagsApi(this.tailSourceId || null)).slice().sort();
+      } catch (error) {
+        console.error("[tags] list failed", error);
+      }
+    },
+    // Adds a tag to one row and updates that row's `.tags` in place (no
+    // full re-query) so the table/inspector/context menu all reflect it
+    // immediately. `rowId` is the composite "source:rowid" id.
+    async addRowTag(rowId, tag) {
+      const trimmed = tag.trim().toLowerCase();
+      if (!trimmed) return;
+      const row = this.tailRows.find((r) => r.id === rowId);
+      if (isTauri()) {
+        try {
+          const tags = await addRowTagApi(rowId, trimmed);
+          if (row) row.tags = tags;
+        } catch (error) {
+          console.error("[tags] add failed", error);
+          return;
+        }
+      } else if (row) {
+        const existing = new Set((row.tags || []).map((t) => t.toLowerCase()));
+        if (!existing.has(trimmed)) row.tags = [...(row.tags || []), trimmed].sort();
+      }
+      this.refreshTags();
+    },
+    async removeRowTag(rowId, tag) {
+      const row = this.tailRows.find((r) => r.id === rowId);
+      if (isTauri()) {
+        try {
+          const tags = await removeRowTagApi(rowId, tag);
+          if (row) row.tags = tags;
+        } catch (error) {
+          console.error("[tags] remove failed", error);
+          return;
+        }
+      } else if (row) {
+        row.tags = (row.tags || []).filter((t) => t.toLowerCase() !== tag.toLowerCase());
+      }
+      this.refreshTags();
+    },
+    // ---- row context menu ----
+    openRowContextMenu(rowId, x, y) {
+      this.selectRow(rowId);
+      this.globalContextMenu = null;
+      this.rowContextMenu = { rowId, x, y };
+    },
+    closeRowContextMenu() {
+      this.rowContextMenu = null;
+    },
+    // ---- global (fallback) context menu ----
+    openGlobalContextMenu(x, y) {
+      this.rowContextMenu = null;
+      this.globalContextMenu = { x, y };
+    },
+    closeGlobalContextMenu() {
+      this.globalContextMenu = null;
     },
     setAccessColumnVisible(key, visible) {
       if (!this.accessColumnLayout.order.includes(key)) return;
@@ -728,6 +988,49 @@ togglePanel(side) {
       this.accessColumnLayout = normalizeAccessColumnLayout();
       this.saveWorkspaceState();
     },
+    // Drag-resize a column header by `delta` px — mirrors resizePanel. Also
+    // opts the column out of auto-fit-to-content, since the user has now
+    // picked a width themselves.
+    resizeAccessColumn(key, delta) {
+      const current = this.accessColumnLayout.widths[key];
+      if (current == null) return;
+      let markedResized = false;
+      if (!this.accessColumnLayout.resized.includes(key)) {
+        this.accessColumnLayout.resized = [...this.accessColumnLayout.resized, key];
+        markedResized = true;
+      }
+      const limits = ACCESS_COLUMN_WIDTH_LIMITS;
+      const next = Math.max(limits.min, Math.min(limits.max, current + delta));
+      if (next === current) {
+        if (markedResized) this.saveWorkspaceState();
+        return;
+      }
+      this.accessColumnLayout.widths[key] = next;
+      this.saveWorkspaceState();
+    },
+    // Un-pins a manually resized column so it goes back to shrinking to fit
+    // its content (triggered by double-clicking its resize handle).
+    clearAccessColumnResize(key) {
+      if (!this.accessColumnLayout.resized.includes(key)) return;
+      this.accessColumnLayout.resized = this.accessColumnLayout.resized.filter((k) => k !== key);
+      this.saveWorkspaceState();
+    },
+    // Applies auto-fit-to-content widths computed by the panel, skipping any
+    // column the user has manually resized.
+    setAutoColumnWidths(widthMap) {
+      const limits = ACCESS_COLUMN_WIDTH_LIMITS;
+      let changed = false;
+      for (const key of Object.keys(widthMap)) {
+        if (this.accessColumnLayout.resized.includes(key)) continue;
+        if (!this.accessColumnLayout.order.includes(key)) continue;
+        const next = Math.max(limits.min, Math.min(limits.max, Math.round(widthMap[key])));
+        if (this.accessColumnLayout.widths[key] !== next) {
+          this.accessColumnLayout.widths[key] = next;
+          changed = true;
+        }
+      }
+      if (changed) this.saveWorkspaceState();
+    },
     _ensureSource() {
       if (!this._source) this._source = createLogSource();
       return this._source;
@@ -741,6 +1044,7 @@ togglePanel(side) {
       this.syncError = null;
       await this.refreshQuery(true);
       this.refreshDomains();
+      this.refreshTags();
     },
     async refreshSourceData() {
       await this.loadSources();
@@ -816,6 +1120,7 @@ togglePanel(side) {
           }
           await this.refreshSourceStats(); // authoritative counts once ingestion is done
           this.refreshDomains();
+          this.refreshTags();
         }
         this.lastSyncedAt = Date.now();
         this.statusBars = statusBarsData();
@@ -886,10 +1191,38 @@ togglePanel(side) {
       await this.refreshSourceData();
       this.expandedSourceIds = this.expandedSourceIds.filter((x) => x !== id);
     },
+    // Hidden sources keep syncing but drop out of "all sources" aggregates
+    // (the access log table, domain/tag lists, stats) — re-pull whatever's
+    // currently driven by that aggregate so the change is visible right away.
+    async setSourceHidden(id, hidden) {
+      const source = this.sources.find((s) => s.id === id);
+      if (source) source.hidden = hidden;
+      try {
+        await setSourceHiddenApi(id, hidden);
+      } catch (error) {
+        if (source) source.hidden = !hidden;
+        throw error;
+      }
+      if (!this.tailSourceId) {
+        this._refreshQuerySoon(0);
+        this.refreshDomains();
+        this.refreshTags();
+      }
+    },
 
     // ---- top talkers ----
     setTalkerKind(kind) {
       this.talkerKind = kind;
+    },
+
+    // ---- status panel (Mix / Total tabs) ----
+    setStatusPanelTab(tab) {
+      this.statusPanelTab = tab;
+    },
+
+    // ---- method panel (Mix / Total tabs) ----
+    setMethodPanelTab(tab) {
+      this.methodPanelTab = tab;
     },
 
     // ---- query builder ----
@@ -1202,6 +1535,24 @@ togglePanel(side) {
         label: "Local rule",
         scope: "url",
         pattern: "",
+        severity: "warn",
+        enabled: true,
+      });
+      this.persistSettings();
+    },
+    // The row context menu's "Add to Alerts": seeds a custom rule that
+    // matches this exact request path literally (regex-escaped), so the
+    // user reviews/broadens the pattern in Settings rather than a blind
+    // auto-generalized regex risking false positives.
+    addLocalRuleFromRow(row) {
+      if (!row?.path) return;
+      const pattern = escapeRegexLiteral(row.path);
+      const label = row.path.length > 60 ? `${row.path.slice(0, 57)}…` : row.path;
+      this.localRules.customRules.push({
+        id: `local_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+        label,
+        scope: "url",
+        pattern,
         severity: "warn",
         enabled: true,
       });

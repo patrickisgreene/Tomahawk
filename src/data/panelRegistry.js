@@ -7,6 +7,7 @@ import SourcesTreePanel from "../components/SourcesTreePanel.vue";
 import TopTalkersContent from "../components/TopTalkersContent.vue";
 import ThroughputContent from "../components/ThroughputContent.vue";
 import StatusMixContent from "../components/StatusMixContent.vue";
+import MethodMixContent from "../components/MethodMixContent.vue";
 import SavedFiltersPanel from "../components/SavedFiltersPanel.vue";
 
 // Every panel a dock can host, keyed by the same id used in panelCatalog
@@ -20,6 +21,7 @@ export const PANEL_REGISTRY = {
   sources: { icon: "ph-hard-drives", label: "Sources", component: SourcesTreePanel },
   talkers: { icon: "ph-ranking", label: "Top talkers", component: TopTalkersContent },
   throughput: { icon: "ph-pulse", label: "Throughput", component: ThroughputContent },
-  mix: { icon: "ph-faders", label: "Status mix", component: StatusMixContent },
+  mix: { icon: "ph-faders", label: "Status", component: StatusMixContent },
+  methods: { icon: "ph-arrows-left-right", label: "Methods", component: MethodMixContent },
   saved: { icon: "ph-bookmark-simple", label: "Saved filters", component: SavedFiltersPanel },
 };

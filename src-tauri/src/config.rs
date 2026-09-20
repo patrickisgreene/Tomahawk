@@ -46,6 +46,12 @@ pub struct SourceConfig {
     pub include_subfolders: bool,
     #[serde(default = "default_log_format")]
     pub log_format: String,
+    /// Hidden from the sources tree's default view and from "all sources"
+    /// aggregates (the access log table, domain/tag lists, stats) when no
+    /// specific source is selected. Ingestion keeps running regardless —
+    /// this is a display filter, not a pause.
+    #[serde(default)]
+    pub hidden: bool,
 }
 
 fn default_pattern() -> String {

@@ -12,6 +12,16 @@
     --danger-border:#6b3a40;
     --warn-bg:#2a2620;
     --warn-border:#5c4a33;
+    /* Categorical series colors (identity, not severity — st2..5 are reserved
+       for status-code severity and never reused here). First 3 slots of the
+       dataviz skill's validated default order (blue/orange/aqua), re-checked
+       against this app's dark surface — the only 3 of its 8 hues that clear
+       the CVD all-pairs floor together, which a pie/small-multiples chart
+       needs since every slice can sit beside every other. A 4th/"other"
+       category uses a neutral gray, not a 4th hue, to stay inside that cap. */
+    --cat-1:#3987e5;
+    --cat-2:#d95926;
+    --cat-3:#199e70;
   }
   html,body{height:100%;margin:0;overflow:hidden}
   *,*::before,*::after{box-sizing:border-box}
@@ -106,6 +116,9 @@
   .filterbar{flex:1;display:flex;align-items:center;gap:6px;height:21px;padding:0 7px;border-radius:var(--radius-sm);background:var(--chrome-bg);border:1px solid var(--chrome-border-2);font:400 10.5px/1 ui-monospace,Menlo,monospace;color:var(--color-neutral-400);min-width:0}
   .filterbar input{flex:1;min-width:0;background:none;border:none;color:inherit;font:inherit;outline:none}
   .filterbar input::placeholder{color:var(--color-neutral-400)}
+  .filter-toggle{flex:none;height:16px;min-width:18px;padding:0 4px;display:grid;place-items:center;border-radius:3px;background:transparent;border:1px solid transparent;color:var(--color-neutral-500);font:600 9.5px/1 ui-monospace,Menlo,monospace;cursor:pointer}
+  .filter-toggle:hover{color:var(--color-text);background:var(--color-neutral-800)}
+  .filter-toggle.active{background:var(--color-accent-800);border-color:var(--color-accent-600);color:var(--color-accent-200)}
   .kbd{margin-left:auto;color:var(--color-neutral-600)}
 
   /* ===== sources tree ===== */
@@ -129,6 +142,8 @@
   .tree-row.selected{color:var(--color-text);font-weight:500;background:var(--color-accent-800);box-shadow:inset 2px 0 0 var(--color-accent)}
   .tree-row.selected .row-actions{display:flex;color:var(--color-accent-300)}
   .tree-row.dim{color:var(--color-neutral-600)}
+  .tree-row.hidden{opacity:.5}
+  .tree-row .row-actions .ph-eye-slash{color:var(--color-accent-300)}
   .tree-children.collapsed{display:none}
 
   /* ===== throughput ===== */
@@ -175,19 +190,28 @@
   .access-toolbar .synced-label{line-height:21px;white-space:nowrap}
   .access-scroll{flex:1;min-height:0;overflow:auto;background:var(--stream-bg);scrollbar-gutter:stable}
   .access-table{width:max-content;min-width:100%}
-  .access-head{flex:none;overflow:hidden;align-items:center;min-height:28px;padding-right:10px;will-change:transform;background:var(--chrome-bg)}
+  .access-head{position:sticky;top:0;z-index:5;width:max-content;min-width:100%;align-items:center;min-height:28px;padding-right:10px;background:var(--chrome-bg)}
   .access-head span:last-child{text-align:left}
   .access-table .tail-row{align-items:center;min-height:28px}
   .access-table .tail-row > span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .tail-head-cell{display:flex;align-items:center;gap:4px;min-width:0;cursor:grab}
+  .tail-head-cell{position:relative;display:flex;align-items:center;gap:4px;min-width:0;cursor:grab}
   .tail-head-cell.dragging{opacity:.45}
   .tail-head-cell.drag-over{background:var(--color-accent-800);box-shadow:inset 2px 0 0 var(--color-accent)}
-  .tail-head-drag{font-size:12px;color:var(--color-neutral-700)}
-  .time-sort{display:flex;align-items:center;gap:4px;background:none;border:0;padding:0;color:inherit;font:inherit;text-transform:inherit;cursor:pointer}
-  .column-picker{position:relative}
+  .tail-head-cell.resizing{cursor:col-resize}
+  .tail-head-drag{font-size:12px;color:var(--color-neutral-700);flex:none}
+  .col-sort{display:flex;align-items:center;gap:4px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background:none;border:0;padding:0;color:inherit;font:inherit;text-transform:inherit;cursor:pointer}
+  .col-sort-static{cursor:default}
+  .col-resize-handle{position:absolute;top:0;bottom:0;right:0;width:7px;cursor:col-resize;z-index:2;touch-action:none}
+  .col-resize-handle::after{content:"";position:absolute;top:0;bottom:0;right:1px;width:2px;background:transparent;transition:background .12s}
+  .col-resize-handle:hover::after,.tail-head-cell.resizing .col-resize-handle::after{background:var(--color-accent)}
+  .column-picker,.domain-picker{position:relative}
   .resync-picker{position:relative;flex:none}
-  .column-picker.open,.resync-picker.open{z-index:220}
+  .column-picker.open,.resync-picker.open,.domain-picker.open{z-index:220}
   .popup-backdrop{position:fixed;inset:0;z-index:190;background:rgba(10,11,18,.48)}
+  .domain-options{position:absolute;left:0;top:26px;z-index:221;width:260px;max-height:380px;display:flex;flex-direction:column;padding:8px;background:var(--chrome-bg);border:1px solid var(--chrome-border-2);border-radius:var(--radius-sm);box-shadow:var(--shadow-sm)}
+  .domain-options .toggle-row{flex:none}
+  .domain-search{margin:6px 0;flex:none}
+  .domain-list{flex:1;min-height:0;overflow:auto}
   .resync-options{position:absolute;left:0;top:26px;z-index:221;width:190px;padding:10px;background:var(--chrome-bg);border:1px solid var(--chrome-border-2);border-radius:var(--radius-sm);box-shadow:var(--shadow-sm)}
   .resync-options > button{width:100%;justify-content:center}
   .resync-options fieldset{margin:10px 0 0;padding:0;border:0}
@@ -274,6 +298,17 @@
   .mix-cell .pct{font:400 9px/1 ui-monospace,Menlo,monospace;color:var(--color-neutral-400)}
   .mix-cell .rate{font:400 8.5px/1 ui-monospace,Menlo,monospace;color:var(--color-neutral-700)}
   .mix-foot{display:flex;align-items:center;gap:6px;height:24px;padding:0 8px;border-top:1px solid var(--chrome-border);font:400 9.5px/1 ui-monospace,Menlo,monospace;color:var(--color-neutral-600)}
+  .status-pie-wrap{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;gap:6px;padding:9px;overflow:auto}
+  .status-pie{width:104px;height:104px;flex:none}
+  .status-pie path{cursor:pointer;outline:none;transition:filter .12s}
+  .status-pie path:hover,.status-pie path.hovered,.status-pie path:focus-visible{filter:brightness(1.2)}
+  .status-legend{width:100%;max-width:180px}
+  .status-legend-row{display:flex;align-items:center;gap:7px;padding:3px 5px;border-radius:var(--radius-sm);font:400 10.5px/1.3 var(--font-body);color:var(--color-neutral-300)}
+  .status-legend-row.hovered{background:rgba(233,233,237,.05)}
+  .status-legend-swatch{width:8px;height:8px;border-radius:2px;flex:none}
+  .status-legend-label{min-width:26px;flex:none;color:var(--color-neutral-400);white-space:nowrap}
+  .status-legend-count{margin-left:auto;font:400 10.5px/1 ui-monospace,Menlo,monospace;color:var(--color-text)}
+  .status-legend-pct{width:42px;text-align:right;font:400 10.5px/1 ui-monospace,Menlo,monospace;color:var(--color-neutral-500)}
 
   /* ===== inspector ===== */
   .insp-search{display:flex;align-items:center;gap:5px;height:30px;padding:0 6px;border-bottom:1px solid var(--chrome-border);flex:none}
@@ -460,6 +495,19 @@
   /* panel picker sits below its anchor rather than centered like the
      other popovers, so its search box loses the generic popover's margin */
   .panel-picker .popover-search{margin:0;border-radius:0;border:none;border-bottom:1px solid var(--chrome-border);height:auto;padding:9px;background:var(--color-surface)}
+
+  /* ===== row context menu ===== */
+  .ctx-menu{padding-bottom:6px}
+  .ctx-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ctx-tags{display:flex;flex-wrap:wrap;gap:5px;padding:2px 12px 6px}
+  .ctx-tags-empty{font:400 10.5px/1.3 var(--font-body);color:var(--color-neutral-600)}
+  .ctx-tag-add{display:flex;align-items:center;gap:5px;margin:0 12px}
+  .ctx-tag-add input{flex:1;min-width:0;height:24px;padding:0 8px;border-radius:var(--radius-sm);background:var(--chrome-bg);border:1px solid var(--chrome-border-2);color:var(--color-text);font:400 11px/1 var(--font-body);outline:none}
+  .ctx-tag-add input::placeholder{color:var(--color-neutral-600)}
+  .ctx-tag-add .icon-btn:disabled{opacity:.4;cursor:default}
+  .insp-tag-editable{display:inline-flex;align-items:center;gap:4px;background:var(--color-accent-800);color:var(--color-accent-300);border:1px solid var(--chrome-border-2)}
+  .insp-tag-editable .ph-x{cursor:pointer;color:var(--color-neutral-400)}
+  .insp-tag-editable .ph-x:hover{color:var(--color-text)}
 
   /* ===== global search palette (t7) ===== */
   .search-backdrop{align-items:flex-start;padding-top:70px}

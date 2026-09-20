@@ -43,6 +43,7 @@ pub fn add_source(input: AddSourceInput) -> Result<SourceSummary, String> {
         pattern: input.pattern.unwrap_or_else(|| "access.log*".to_string()),
         include_subfolders: input.include_subfolders.unwrap_or(false),
         log_format: input.log_format.unwrap_or_else(|| "apache_combined".to_string()),
+        hidden: false,
     };
 
     // Fail fast if the path isn't readable, before it's persisted.
@@ -61,6 +62,22 @@ pub fn remove_source(source_id: String) -> Result<(), String> {
     config.sources.retain(|s| s.id != source_id);
     save_config(&config)?;
     db::delete_source_db(&source_id)
+}
+
+/// Hides/unhides a source. Hidden sources are excluded from "all sources"
+/// aggregates (the access log table, domain/tag lists, stats) but keep
+/// syncing in the background and can still be viewed by picking them
+/// directly from the Source filter.
+#[tauri::command]
+pub fn set_source_hidden(source_id: String, hidden: bool) -> Result<(), String> {
+    let mut config = load_config()?;
+    let source = config
+        .sources
+        .iter_mut()
+        .find(|s| s.id == source_id)
+        .ok_or_else(|| format!("unknown source: {source_id}"))?;
+    source.hidden = hidden;
+    save_config(&config)
 }
 
 #[tauri::command]
@@ -106,6 +123,7 @@ fn fast_summarize(source: &SourceConfig) -> SourceSummary {
         row_count: 0,
         last_ts: None,
         files,
+        hidden: source.hidden,
     }
 }
 
@@ -137,6 +155,15 @@ pub async fn get_source_stats(source_id: String) -> Result<SourceStats, String> 
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// Opens the WebView's DevTools — the app disables the native right-click
+/// menu everywhere (see App.vue), so this backs the custom context menus'
+/// "Inspect" item, which otherwise has no way to reach it.
+#[tauri::command]
+pub fn open_devtools(window: tauri::WebviewWindow) -> Result<(), String> {
+    window.open_devtools();
+    Ok(())
 }
 
 #[tauri::command]
@@ -253,6 +280,16 @@ const ALL_QUERY_COLUMNS: &[&str] = &[
 
 const NUMERIC_QUERY_COLUMNS: &[&str] = &["ts", "status", "bytes", "ms"];
 
+/// The HTTP methods offered by the "Method" filter dropdown, lowercased for
+/// comparison. Anything a real log line contains outside this list (the
+/// parser doesn't constrain `method` to an enum) falls into "Non-standard".
+const STANDARD_HTTP_METHODS: &[&str] = &["get", "head", "post", "put", "delete", "connect", "options", "trace", "patch"];
+
+/// Sentinel value for `QueryInput.method` meaning "any method not in
+/// `STANDARD_HTTP_METHODS`", sent by the frontend's "Non-standard methods"
+/// filter option.
+const NONSTANDARD_METHOD_SENTINEL: &str = "__nonstandard__";
+
 /// Maps a query-builder field id (the camelCase ids the UI uses) to its real
 /// column, and validates it against the schema.
 fn query_column(field: &str) -> Option<&'static str> {
@@ -294,7 +331,51 @@ fn access_row_from_sql(source_id: &str, row: &rusqlite::Row) -> Result<AccessLog
         referer: row.get::<_, Option<String>>(9)?.unwrap_or_default(),
         user_agent: row.get::<_, Option<String>>(10)?.unwrap_or_default(),
         raw: row.get::<_, Option<String>>(11)?.unwrap_or_default(),
+        tags: Vec::new(), // attached after pagination — see attach_tags()
     })
+}
+
+/// Splits a composite row id (`"{source_id}:{local_rowid}"`, see
+/// `access_row_from_sql`) back into its parts. Never trust this as parsed
+/// from the frontend without validating the source exists.
+fn parse_row_id(id: &str) -> Option<(&str, i64)> {
+    let (source_id, rowid) = id.rsplit_once(':')?;
+    Some((source_id, rowid.parse().ok()?))
+}
+
+/// Fills in `.tags` on an already-paginated page of rows, one indexed
+/// `row_id IN (...)` lookup per source involved — bounded by the page size
+/// (typically ~1000), not the whole database, unlike the over-fetch used to
+/// compute the page itself.
+fn attach_tags(rows: &mut [AccessLogRow]) -> Result<(), String> {
+    use std::collections::HashMap;
+    let mut by_source: HashMap<&str, Vec<i64>> = HashMap::new();
+    for row in rows.iter() {
+        if let Some((source_id, local_id)) = parse_row_id(&row.id) {
+            by_source.entry(source_id).or_default().push(local_id);
+        }
+    }
+    let mut tags_by_full_id: HashMap<String, Vec<String>> = HashMap::new();
+    for (source_id, local_ids) in &by_source {
+        let conn = db::open_source_db(source_id)?;
+        let placeholders = local_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql = format!("SELECT row_id, tag FROM row_tags WHERE row_id IN ({placeholders}) ORDER BY tag");
+        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+        let params = rusqlite::params_from_iter(local_ids.iter());
+        let mapped = stmt
+            .query_map(params, |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))
+            .map_err(|e| e.to_string())?;
+        for entry in mapped {
+            let (local_id, tag) = entry.map_err(|e| e.to_string())?;
+            tags_by_full_id.entry(format!("{source_id}:{local_id}")).or_default().push(tag);
+        }
+    }
+    for row in rows.iter_mut() {
+        if let Some(tags) = tags_by_full_id.remove(&row.id) {
+            row.tags = tags;
+        }
+    }
+    Ok(())
 }
 
 /// Numeric rowid embedded in the composite `source:rowid` id — the tie-break
@@ -303,15 +384,40 @@ fn row_id(row: &AccessLogRow) -> i64 {
     row.id.rsplit(':').next().and_then(|s| s.parse().ok()).unwrap_or(0)
 }
 
-/// Orders two rows by (ts, rowid), matching the SQL `ORDER BY ts, id`
-/// direction chosen by the frontend sort toggle.
-fn compare_rows(a: &AccessLogRow, b: &AccessLogRow, sort_desc: bool) -> std::cmp::Ordering {
+/// Orders two rows by the chosen sort column (falling back to (ts, rowid) as
+/// a deterministic tiebreak), matching the SQL `ORDER BY {col}, ts, id`
+/// direction used per-source so the final cross-source merge agrees with it.
+/// `sort_col` is always a value already validated by `query_column()`.
+fn compare_rows(a: &AccessLogRow, b: &AccessLogRow, sort_col: &str, sort_desc: bool) -> std::cmp::Ordering {
+    let primary = match sort_col {
+        "status" => a.status.cmp(&b.status),
+        "bytes" => a.bytes.cmp(&b.bytes),
+        "ms" => a.ms.partial_cmp(&b.ms).unwrap_or(std::cmp::Ordering::Equal),
+        "file_path" => a.file_path.to_lowercase().cmp(&b.file_path.to_lowercase()),
+        "ip" => a.ip.to_lowercase().cmp(&b.ip.to_lowercase()),
+        "method" => a.method.to_lowercase().cmp(&b.method.to_lowercase()),
+        "path" => a.path.to_lowercase().cmp(&b.path.to_lowercase()),
+        "referer" => a.referer.to_lowercase().cmp(&b.referer.to_lowercase()),
+        "user_agent" => a.user_agent.to_lowercase().cmp(&b.user_agent.to_lowercase()),
+        "raw" => a.raw.to_lowercase().cmp(&b.raw.to_lowercase()),
+        "hostname" => a.hostname.to_lowercase().cmp(&b.hostname.to_lowercase()),
+        "forwarded_for" => a.forwarded_for.to_lowercase().cmp(&b.forwarded_for.to_lowercase()),
+        "ident" => a.ident.to_lowercase().cmp(&b.ident.to_lowercase()),
+        "auth_user" => a.auth_user.to_lowercase().cmp(&b.auth_user.to_lowercase()),
+        "timestamp" => a.timestamp.to_lowercase().cmp(&b.timestamp.to_lowercase()),
+        "request" => a.request.to_lowercase().cmp(&b.request.to_lowercase()),
+        "protocol" => a.protocol.to_lowercase().cmp(&b.protocol.to_lowercase()),
+        _ => a.ts.cmp(&b.ts),
+    };
+    let primary = if sort_desc { primary.reverse() } else { primary };
+    if primary != std::cmp::Ordering::Equal {
+        return primary;
+    }
     let by_ts = if sort_desc { b.ts.cmp(&a.ts) } else { a.ts.cmp(&b.ts) };
     if by_ts != std::cmp::Ordering::Equal {
         return by_ts;
     }
-    let by_id = if sort_desc { row_id(b).cmp(&row_id(a)) } else { row_id(a).cmp(&row_id(b)) };
-    by_id
+    if sort_desc { row_id(b).cmp(&row_id(a)) } else { row_id(a).cmp(&row_id(b)) }
 }
 
 /// Runs off the main thread — a large `limit` across several multi-million
@@ -320,7 +426,7 @@ fn load_recent_rows_impl(source_ids: Option<Vec<String>>, limit: i64) -> Result<
     let config = load_config()?;
     let sources: Vec<&SourceConfig> = match &source_ids {
         Some(ids) => config.sources.iter().filter(|s| ids.contains(&s.id)).collect(),
-        None => config.sources.iter().collect(),
+        None => config.sources.iter().filter(|s| !s.hidden).collect(),
     };
 
     let mut all_rows = Vec::new();
@@ -359,9 +465,28 @@ pub struct QueryConditionInput {
 pub struct QueryInput {
     pub source_id: Option<String>,
     pub domain: Option<String>,
+    /// How `domain` is matched against a shared-hosting log's `www.`/bare
+    /// hostname pairs: `"merge"` (default) matches both the given domain and
+    /// its `www.` twin, `"wwwOnly"` matches only the `www.` form, anything
+    /// else matches `domain` exactly.
+    pub domain_www_mode: Option<String>,
     pub min_status: Option<i64>,
+    /// A specific HTTP method (case-insensitive), or the sentinel
+    /// `"__nonstandard__"` meaning "not one of `STANDARD_HTTP_METHODS`".
+    pub method: Option<String>,
+    /// A tag assigned via `add_row_tag` (case-insensitive; stored lowercase).
+    pub tag: Option<String>,
     pub window_ms: Option<i64>,
+    /// The free-text search box. A leading "!" negates the match (rows where
+    /// no field matches, instead of rows where some field does).
     pub text: Option<String>,
+    /// When true, `text` is matched byte-exact instead of the default
+    /// case-insensitive match.
+    pub text_case_sensitive: Option<bool>,
+    /// When true, `text` (minus any leading "!") is compiled as a regex via
+    /// the Rust `regex` crate and pushed into SQLite's registered `regexp()`
+    /// function, instead of treated as a plain substring.
+    pub text_regex: Option<bool>,
     pub conditions: Option<Vec<QueryConditionInput>>,
 }
 
@@ -381,10 +506,18 @@ pub struct QueryRowsResult {
 /// SQLite so filtering always operates on the *entire* database, not just the
 /// rows currently loaded in the frontend. Runs off the main thread.
 #[tauri::command]
-pub async fn query_rows(input: QueryInput, sort_desc: bool, offset: i64, limit: i64) -> Result<QueryRowsResult, String> {
-    tauri::async_runtime::spawn_blocking(move || query_rows_impl(input, sort_desc, offset, limit))
+pub async fn query_rows(input: QueryInput, sort_by: Option<String>, sort_desc: bool, offset: i64, limit: i64) -> Result<QueryRowsResult, String> {
+    tauri::async_runtime::spawn_blocking(move || query_rows_impl(input, sort_by, sort_desc, offset, limit))
         .await
         .map_err(|e| e.to_string())?
+}
+
+/// Escapes SQL LIKE's own wildcards (`%`, `_`) so a "contains"/plain-text
+/// search matches them literally — without this, typing e.g. a URL-encoded
+/// "%20" or a path with an underscore into the search box would silently act
+/// as a wildcard even with regex mode off. Paired with `LIKE ? ESCAPE '\'`.
+fn escape_like(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")
 }
 
 /// Characters that make a "matches" value a real regex rather than plain text.
@@ -394,6 +527,26 @@ fn is_literal_regex(value: &str) -> bool {
     !value.chars().any(|c| REGEX_META_CHARS.contains(c))
 }
 
+/// Cache key for the free-text search box's compiled regex, shared between
+/// `build_box_filters` (which only needs the key to bind as a param) and
+/// `compile_text_regex` (which owns the actual `Regex`). Namespaced with a
+/// control character prefix so it can never collide with a query-builder
+/// condition's regex cache key (see `compile_regexes`), and includes the
+/// case-sensitivity flag since the same pattern text compiles differently
+/// depending on it.
+fn text_regex_cache_key(needle: &str, case_sensitive: bool) -> String {
+    format!("\u{1}text\u{1}{case_sensitive}\u{1}{needle}")
+}
+
+/// Splits the free-text search box's raw input into its negation flag and
+/// the actual needle — a leading "!" means "rows where no field matches".
+fn parse_text_filter(raw: &str) -> (bool, &str) {
+    match raw.strip_prefix('!') {
+        Some(rest) => (true, rest.trim()),
+        None => (false, raw),
+    }
+}
+
 /// The toolbar filters (everything except the query-builder conditions) become
 /// one SQL WHERE fragment with ordered parameters. `min_ts` is the precomputed
 /// start of a "last N of log" window.
@@ -401,25 +554,76 @@ fn build_box_filters(input: &QueryInput, min_ts: Option<i64>) -> (Vec<String>, V
     let mut clauses: Vec<String> = Vec::new();
     let mut params: Vec<rusqlite::types::Value> = Vec::new();
     if let Some(domain) = input.domain.as_deref().map(|d| d.trim()).filter(|d| !d.is_empty()) {
-        clauses.push("LOWER(COALESCE(hostname,'')) = ?".to_string());
-        params.push(domain.to_lowercase().into());
+        let root = domain.to_lowercase();
+        let www = format!("www.{root}");
+        match input.domain_www_mode.as_deref() {
+            Some("wwwOnly") => {
+                clauses.push("LOWER(COALESCE(hostname,'')) = ?".to_string());
+                params.push(www.into());
+            }
+            Some("exact") => {
+                clauses.push("LOWER(COALESCE(hostname,'')) = ?".to_string());
+                params.push(root.into());
+            }
+            _ => {
+                clauses.push("LOWER(COALESCE(hostname,'')) IN (?, ?)".to_string());
+                params.push(root.into());
+                params.push(www.into());
+            }
+        }
     }
     let min_status = input.min_status.unwrap_or(0);
     if min_status > 0 {
         clauses.push("status >= ?".to_string());
         params.push(min_status.into());
     }
+    if let Some(method) = input.method.as_deref().map(|m| m.trim()).filter(|m| !m.is_empty()) {
+        if method == NONSTANDARD_METHOD_SENTINEL {
+            let placeholders = STANDARD_HTTP_METHODS.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+            clauses.push(format!("LOWER(method) NOT IN ({placeholders})"));
+            for m in STANDARD_HTTP_METHODS {
+                params.push(m.to_string().into());
+            }
+        } else {
+            clauses.push("LOWER(method) = ?".to_string());
+            params.push(method.to_lowercase().into());
+        }
+    }
+    if let Some(tag) = input.tag.as_deref().map(|t| t.trim()).filter(|t| !t.is_empty()) {
+        clauses.push("id IN (SELECT row_id FROM row_tags WHERE tag = ?)".to_string());
+        params.push(tag.to_lowercase().into());
+    }
     if let Some(mts) = min_ts {
         clauses.push("ts >= ?".to_string());
         params.push(mts.into());
     }
-    if let Some(needle) = input.text.as_deref().map(|t| t.trim()).filter(|t| !t.is_empty()) {
-        let mut parts = Vec::new();
-        for col in ALL_QUERY_COLUMNS {
-            parts.push(format!("COALESCE(CAST({col} AS TEXT),'') LIKE ?"));
-            params.push(format!("%{}%", needle.to_lowercase()).into());
+    if let Some(raw) = input.text.as_deref().map(|t| t.trim()).filter(|t| !t.is_empty()) {
+        let (negate, needle) = parse_text_filter(raw);
+        if !needle.is_empty() {
+            let case_sensitive = input.text_case_sensitive.unwrap_or(false);
+            let mut parts = Vec::new();
+            if input.text_regex.unwrap_or(false) {
+                let key = text_regex_cache_key(needle, case_sensitive);
+                for col in ALL_QUERY_COLUMNS {
+                    parts.push(format!("regexp(COALESCE(CAST({col} AS TEXT),''), ?)"));
+                    params.push(key.clone().into());
+                }
+            } else if case_sensitive {
+                // SQLite's LIKE is case-insensitive for ASCII regardless of
+                // collation, so an exact-case "contains" needs INSTR instead.
+                for col in ALL_QUERY_COLUMNS {
+                    parts.push(format!("INSTR(COALESCE(CAST({col} AS TEXT),''), ?) > 0"));
+                    params.push(needle.to_string().into());
+                }
+            } else {
+                for col in ALL_QUERY_COLUMNS {
+                    parts.push(format!("COALESCE(CAST({col} AS TEXT),'') LIKE ? ESCAPE '\\'"));
+                    params.push(format!("%{}%", escape_like(&needle.to_lowercase())).into());
+                }
+            }
+            let joined = format!("({})", parts.join(" OR "));
+            clauses.push(if negate { format!("NOT {joined}") } else { joined });
         }
-        clauses.push(format!("({})", parts.join(" OR ")));
     }
     (clauses, params)
 }
@@ -454,12 +658,12 @@ fn build_condition_filters(conditions: &[QueryConditionInput]) -> Result<(Vec<St
         } else {
             match op {
                 "contains" => {
-                    clauses.push(format!("COALESCE({column},'') LIKE ?"));
-                    params.push(format!("%{}%", value.to_lowercase()).into());
+                    clauses.push(format!("COALESCE({column},'') LIKE ? ESCAPE '\\'"));
+                    params.push(format!("%{}%", escape_like(&value.to_lowercase())).into());
                 }
                 "matches" if is_literal_regex(value) => {
-                    clauses.push(format!("COALESCE({column},'') LIKE ?"));
-                    params.push(format!("%{}%", value.to_lowercase()).into());
+                    clauses.push(format!("COALESCE({column},'') LIKE ? ESCAPE '\\'"));
+                    params.push(format!("%{}%", escape_like(&value.to_lowercase())).into());
                 }
                 "matches" => {
                     clauses.push(format!("regexp({column}, ?)"));
@@ -511,6 +715,31 @@ fn compile_regexes(conditions: &[QueryConditionInput]) -> Result<std::collection
     Ok(regexes)
 }
 
+/// Compiles the free-text search box's pattern when regex mode is on, keyed
+/// by `text_regex_cache_key` so `build_box_filters` can bind the same key
+/// without owning the `Regex` itself. Unlike the query-builder's "matches"
+/// operator, this always compiles as regex when the toggle is on — there's
+/// no literal-text fallback, since the box already has its own plain
+/// substring mode to switch back to.
+fn compile_text_regex(input: &QueryInput) -> Result<Option<(String, regex::Regex)>, String> {
+    if !input.text_regex.unwrap_or(false) {
+        return Ok(None);
+    }
+    let Some(raw) = input.text.as_deref().map(|t| t.trim()).filter(|t| !t.is_empty()) else {
+        return Ok(None);
+    };
+    let (_, needle) = parse_text_filter(raw);
+    if needle.is_empty() {
+        return Ok(None);
+    }
+    let case_sensitive = input.text_case_sensitive.unwrap_or(false);
+    let re = regex::RegexBuilder::new(needle)
+        .case_insensitive(!case_sensitive)
+        .build()
+        .map_err(|e| format!("invalid search regex: {e}"))?;
+    Ok(Some((text_regex_cache_key(needle, case_sensitive), re)))
+}
+
 /// Trims/slices a globally-sorted row list down to the requested page.
 fn paginate(rows: &mut Vec<AccessLogRow>, offset: usize, limit: usize) {
     if offset >= rows.len() {
@@ -526,14 +755,18 @@ fn paginate(rows: &mut Vec<AccessLogRow>, offset: usize, limit: usize) {
     }
 }
 
-fn query_rows_impl(input: QueryInput, sort_desc: bool, offset_input: i64, limit_input: i64) -> Result<QueryRowsResult, String> {
+fn query_rows_impl(input: QueryInput, sort_by: Option<String>, sort_desc: bool, offset_input: i64, limit_input: i64) -> Result<QueryRowsResult, String> {
     let offset = offset_input.max(0) as usize;
     let limit = if limit_input <= 0 { 1000 } else { limit_input as usize };
+    // Validated against the same whitelist as query-builder fields — never
+    // splice an unvalidated column name into SQL.
+    let sort_col = sort_by.as_deref().and_then(query_column).unwrap_or("ts");
+    let sort_collate = if NUMERIC_QUERY_COLUMNS.contains(&sort_col) { "" } else { " COLLATE NOCASE" };
 
     let config = load_config()?;
     let sources: Vec<&SourceConfig> = match &input.source_id {
         Some(id) => config.sources.iter().filter(|s| s.id == *id).collect(),
-        None => config.sources.iter().collect(),
+        None => config.sources.iter().filter(|s| !s.hidden).collect(),
     };
 
     // "Last N of log" windows are relative to the newest row across the
@@ -557,7 +790,11 @@ fn query_rows_impl(input: QueryInput, sort_desc: bool, offset_input: i64, limit_
 
     let (box_clauses, box_params) = build_box_filters(&input, min_ts);
     let (cond_clauses, cond_params) = build_condition_filters(input.conditions.as_deref().unwrap_or(&[]))?;
-    let regexes = std::sync::Arc::new(compile_regexes(input.conditions.as_deref().unwrap_or(&[]))?);
+    let mut regexes = compile_regexes(input.conditions.as_deref().unwrap_or(&[]))?;
+    if let Some((key, re)) = compile_text_regex(&input)? {
+        regexes.insert(key, re);
+    }
+    let regexes = std::sync::Arc::new(regexes);
 
     let mut universe: i64 = 0;
     let mut collected: Vec<AccessLogRow> = Vec::new();
@@ -582,8 +819,9 @@ fn query_rows_impl(input: QueryInput, sort_desc: bool, offset_input: i64, limit_
         params.push((fetch as i64).into());
         params.push(0i64.into());
         let sql = format!(
-            "SELECT {ROW_COLUMNS} FROM access_rows {} ORDER BY ts {}, id {} LIMIT ? OFFSET ?",
+            "SELECT {ROW_COLUMNS} FROM access_rows {} ORDER BY {sort_col}{sort_collate} {}, ts {}, id {} LIMIT ? OFFSET ?",
             joined_where(&box_clauses, &cond_clauses),
+            if sort_desc { "DESC" } else { "ASC" },
             if sort_desc { "DESC" } else { "ASC" },
             if sort_desc { "DESC" } else { "ASC" },
         );
@@ -611,8 +849,9 @@ fn query_rows_impl(input: QueryInput, sort_desc: bool, offset_input: i64, limit_
             .map_err(|e| e.to_string())?;
     }
 
-    collected.sort_by(|a, b| compare_rows(a, b, sort_desc));
+    collected.sort_by(|a, b| compare_rows(a, b, sort_col, sort_desc));
     paginate(&mut collected, offset, limit);
+    attach_tags(&mut collected)?;
     Ok(QueryRowsResult { rows: collected, total, universe })
 }
 
@@ -625,7 +864,7 @@ pub async fn list_domains(source_id: Option<String>) -> Result<Vec<String>, Stri
         let config = load_config()?;
         let sources: Vec<&SourceConfig> = match &source_id {
             Some(id) => config.sources.iter().filter(|s| s.id == *id).collect(),
-            None => config.sources.iter().collect(),
+            None => config.sources.iter().filter(|s| !s.hidden).collect(),
         };
         let mut domains: Vec<String> = Vec::new();
         for source in &sources {
@@ -644,6 +883,88 @@ pub async fn list_domains(source_id: Option<String>) -> Result<Vec<String>, Stri
         }
         domains.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
         Ok(domains)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Distinct tags across the involved sources, for the Tag filter dropdown.
+/// Tags are always stored lowercase (see `row_tags` in db.rs), so unlike
+/// `list_domains` there's no case-fold dedup to do here.
+#[tauri::command]
+pub async fn list_tags(source_id: Option<String>) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let config = load_config()?;
+        let sources: Vec<&SourceConfig> = match &source_id {
+            Some(id) => config.sources.iter().filter(|s| s.id == *id).collect(),
+            None => config.sources.iter().filter(|s| !s.hidden).collect(),
+        };
+        let mut tags: Vec<String> = Vec::new();
+        for source in &sources {
+            let conn = db::open_source_db(&source.id)?;
+            let mut stmt = conn.prepare("SELECT DISTINCT tag FROM row_tags ORDER BY tag").map_err(|e| e.to_string())?;
+            let rows = stmt.query_map([], |row| row.get::<_, String>(0)).map_err(|e| e.to_string())?;
+            for row in rows {
+                let tag = row.map_err(|e| e.to_string())?;
+                if !tags.contains(&tag) {
+                    tags.push(tag);
+                }
+            }
+        }
+        tags.sort();
+        Ok(tags)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Trims, lowercases, and length-caps user-entered tag text. `None` for
+/// blank input — the frontend must not call add/remove with an empty tag.
+fn normalize_tag(tag: &str) -> Option<String> {
+    let trimmed = tag.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(trimmed.chars().take(40).collect::<String>().to_lowercase())
+}
+
+fn tags_for_row(conn: &rusqlite::Connection, local_id: i64) -> Result<Vec<String>, String> {
+    let mut stmt = conn
+        .prepare("SELECT tag FROM row_tags WHERE row_id = ?1 ORDER BY tag")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(rusqlite::params![local_id], |r| r.get::<_, String>(0))
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+}
+
+/// Adds a tag to one row (idempotent — re-adding an existing tag is a no-op,
+/// enforced by `row_tags`'s primary key) and returns that row's full updated
+/// tag list, sorted, so the frontend can replace its local copy in place
+/// instead of re-querying the whole table.
+#[tauri::command]
+pub async fn add_row_tag(row_id: String, tag: String) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let (source_id, local_id) = parse_row_id(&row_id).ok_or_else(|| "invalid row id".to_string())?;
+        let tag = normalize_tag(&tag).ok_or_else(|| "tag cannot be empty".to_string())?;
+        let conn = db::open_source_db(source_id)?;
+        conn.execute("INSERT OR IGNORE INTO row_tags (row_id, tag) VALUES (?1, ?2)", rusqlite::params![local_id, tag])
+            .map_err(|e| e.to_string())?;
+        tags_for_row(&conn, local_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn remove_row_tag(row_id: String, tag: String) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let (source_id, local_id) = parse_row_id(&row_id).ok_or_else(|| "invalid row id".to_string())?;
+        let tag = normalize_tag(&tag).ok_or_else(|| "tag cannot be empty".to_string())?;
+        let conn = db::open_source_db(source_id)?;
+        conn.execute("DELETE FROM row_tags WHERE row_id = ?1 AND tag = ?2", rusqlite::params![local_id, tag])
+            .map_err(|e| e.to_string())?;
+        tags_for_row(&conn, local_id)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -795,6 +1116,7 @@ fn summarize(source: &SourceConfig) -> SourceSummary {
         row_count,
         last_ts,
         files,
+        hidden: source.hidden,
     }
 }
 

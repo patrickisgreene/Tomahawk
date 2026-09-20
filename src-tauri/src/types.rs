@@ -31,6 +31,9 @@ pub struct AccessLogRow {
     /// text instead of reconstructing one (which is all the mock data can
     /// do, since it never had a real line to begin with).
     pub raw: String,
+    /// User-assigned tags (see `row_tags` in db.rs), sorted alphabetically.
+    /// Attached after the main query, not part of ROW_COLUMNS.
+    pub tags: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -72,6 +75,7 @@ pub struct SourceSummary {
     pub row_count: i64,
     pub last_ts: Option<i64>,
     pub files: Vec<SourceFileSummary>,
+    pub hidden: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]

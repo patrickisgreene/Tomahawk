@@ -1,22 +1,20 @@
 <script setup>
 import { computed } from "vue";
 import { useMonitorStore } from "../store/monitor";
-import { fmtMs } from "../data/format";
+import { fmtMs, fmtRate, fmtDuration } from "../data/format";
+import { buildPieSlices } from "../data/pieChart";
+import PanelTabs from "./PanelTabs.vue";
+import MixBarCells from "./MixBarCells.vue";
+import MixPieChart from "./MixPieChart.vue";
 
 const store = useMonitorStore();
+const TABS = [
+  { id: "mix", label: "Mix" },
+  { id: "total", label: "Total" },
+];
 
-function fmtRate(r) {
-  if (r >= 1000) return (r / 1000).toFixed(2).replace(/\.?0+$/, "") + "k/s";
-  if (r >= 10) return r.toFixed(0) + "/s";
-  return r.toFixed(1) + "/s";
-}
-function fmtDuration(sec) {
-  if (sec < 60) return Math.round(sec) + "s";
-  const mins = Math.floor(sec / 60);
-  const rem = Math.round(sec % 60);
-  return mins + "m" + (rem ? " " + rem + "s" : "");
-}
-
+// ---- Mix tab: the per-class bar cells, plus p95 (not part of the Total
+// pie — it's a latency figure, not a slice of the request total) ----
 const cells = computed(() => {
   const s = store.statusMixStats;
   const base = [
@@ -34,18 +32,26 @@ const cells = computed(() => {
       : { lbl: "p95", pct: 0, rate: "not in this log format", color: "var(--color-neutral-600)", value: "n/a" };
   return [...base, p95Cell];
 });
+
+// ---- Total tab: the same per-class split as a pie chart ----
+const STATUS_CLASSES = [
+  { key: "c2", label: "2xx", color: "var(--st2)" },
+  { key: "c3", label: "3xx", color: "var(--st3)" },
+  { key: "c4", label: "4xx", color: "var(--st4)" },
+  { key: "c5", label: "5xx", color: "var(--st5)" },
+];
+const slices = computed(() => {
+  const s = store.statusMixStats;
+  const classes = STATUS_CLASSES.map((cls) => ({ ...cls, count: s[cls.key].count, pct: s[cls.key].pct }));
+  return buildPieSlices(classes, 60, 60, 52);
+});
 </script>
 
 <template>
   <div class="panel-fill">
-    <div class="mix-grid">
-      <div v-for="c in cells" :key="c.lbl" class="mix-cell" :class="{ danger: c.danger }">
-        <div class="lbl" :style="{ color: c.color }">{{ c.lbl }}</div>
-        <div class="bar"><div class="bar-fill" :style="{ height: Math.min(100, c.pct) + '%', background: c.color }"></div></div>
-        <div class="pct" :style="c.danger ? { color: c.color } : {}">{{ c.value || c.pct.toFixed(1) + '%' }}</div>
-        <div class="rate">{{ c.rate }}</div>
-      </div>
-    </div>
+    <PanelTabs :tabs="TABS" :active="store.statusPanelTab" @select="store.setStatusPanelTab" />
+    <MixBarCells v-if="store.statusPanelTab === 'mix'" :cells="cells" />
+    <MixPieChart v-else :slices="slices" :total="store.statusMixStats.total" />
     <div class="mix-foot">
       <span>{{ store.statusMixStats.total.toLocaleString() }} requests</span>
       <span style="margin-left:auto">over {{ fmtDuration(store.statusMixStats.spanSec) }}</span>

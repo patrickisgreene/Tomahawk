@@ -14,6 +14,19 @@ export const fmtMs = (ms) => (ms == null ? "—" : ms >= 1000 ? (ms / 1000).toFi
 
 export const fmtBytes = (n) => (n >= 1000 ? (n / 1000).toFixed(1).replace(/\.0$/, "") + "k" : String(n));
 
+// Shared by the dock panels' Mix tabs (StatusMixContent, MethodMixContent).
+export const fmtRate = (r) => {
+  if (r >= 1000) return (r / 1000).toFixed(2).replace(/\.?0+$/, "") + "k/s";
+  if (r >= 10) return r.toFixed(0) + "/s";
+  return r.toFixed(1) + "/s";
+};
+export const fmtDuration = (sec) => {
+  if (sec < 60) return Math.round(sec) + "s";
+  const mins = Math.floor(sec / 60);
+  const rem = Math.round(sec % 60);
+  return mins + "m" + (rem ? " " + rem + "s" : "");
+};
+
 export const STATUS_TEXT = {
   200: "OK", 201: "Created", 204: "No Content", 301: "Moved Permanently", 302: "Found",
   304: "Not Modified", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found",

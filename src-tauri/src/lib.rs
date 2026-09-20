@@ -15,12 +15,17 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             commands::list_local_dir,
+            commands::open_devtools,
             commands::add_source,
             commands::remove_source,
+            commands::set_source_hidden,
             commands::list_sources,
             commands::get_source_stats,
             commands::query_rows,
             commands::list_domains,
+            commands::list_tags,
+            commands::add_row_tag,
+            commands::remove_row_tag,
             commands::list_query_fields,
             commands::geoip_status,
             commands::download_geoip_database,

@@ -28,6 +28,11 @@ export async function listSources() {
   return await invoke("list_sources");
 }
 
+export async function setSourceHidden(sourceId, hidden) {
+  if (!isTauri()) throw new Error(NOT_AVAILABLE);
+  return await invoke("set_source_hidden", { sourceId, hidden });
+}
+
 export async function getSourceStats(sourceId) {
   if (!isTauri()) return null;
   return await invoke("get_source_stats", { sourceId });
@@ -35,13 +40,14 @@ export async function getSourceStats(sourceId) {
 
 /**
  * Runs the SQL-backed access-log query (search text, domain/source/window/
- * status filters and query-builder conditions are all applied against the
- * *entire* database, then a page is returned for the requested offset).
+ * status/method filters and query-builder conditions are all applied against
+ * the *entire* database, sorted by `sortBy` [a query field id, or "ts" for
+ * the timestamp column], then a page is returned for the requested offset).
  * Resolves to { rows, total, universe }.
  */
-export async function queryRows(filters, sortDesc, offset, limit) {
+export async function queryRows(filters, sortBy, sortDesc, offset, limit) {
   if (!isTauri()) return { rows: [], total: 0, universe: 0 };
-  return await invoke("query_rows", { input: filters, sortDesc, offset, limit });
+  return await invoke("query_rows", { input: filters, sortBy, sortDesc, offset, limit });
 }
 
 /**
@@ -56,4 +62,26 @@ export async function listDomains(sourceId) {
 export async function listQueryFields() {
   if (!isTauri()) return [];
   return await invoke("list_query_fields");
+}
+
+/**
+ * Distinct tags in use, for the Tag filter dropdown.
+ */
+export async function listTags(sourceId) {
+  if (!isTauri()) return [];
+  return await invoke("list_tags", { sourceId: sourceId || null });
+}
+
+/**
+ * Adds/removes a tag on one row. Resolves to that row's full updated tag
+ * list (sorted), so the store can replace its local copy in place.
+ */
+export async function addRowTag(rowId, tag) {
+  if (!isTauri()) throw new Error(NOT_AVAILABLE);
+  return await invoke("add_row_tag", { rowId, tag });
+}
+
+export async function removeRowTag(rowId, tag) {
+  if (!isTauri()) throw new Error(NOT_AVAILABLE);
+  return await invoke("remove_row_tag", { rowId, tag });
 }

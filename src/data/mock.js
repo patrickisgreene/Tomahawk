@@ -198,7 +198,8 @@ export const panelCatalog = [
     { id: "query", icon: "ph-funnel", name: "Query builder", desc: "Visual field/operator conditions over any source" },
     { id: "talkers", icon: "ph-ranking", name: "Top talkers", desc: "Ranked clients, paths, agents and referrers" },
     { id: "throughput", icon: "ph-pulse", name: "Throughput", desc: "Req/s and 5xx rate sparklines" },
-    { id: "mix", icon: "ph-faders", name: "Status mix", desc: "2xx/3xx/4xx/5xx split and p95 for the current window" },
+    { id: "mix", icon: "ph-faders", name: "Status", desc: "2xx/3xx/4xx/5xx split and p95 for the current window, as a mix or a pie chart" },
+    { id: "methods", icon: "ph-arrows-left-right", name: "Methods", desc: "GET/POST/PUT/Other split for the current window, as a mix or a pie chart" },
   ] },
   { group: "Structure", items: [
     { id: "sources", icon: "ph-hard-drives", name: "Sources", desc: "Registered log sources and their files" },
