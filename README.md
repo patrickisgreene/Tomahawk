@@ -6,6 +6,13 @@ Advanced HTTP Error Log Analyzer
   <img src="images/screenshot.png" alt="Tomahawk desktop app" width="1100" />
 </p>
 
+<p align="center">
+  <img src="https://img.shields.io/github/license/patrickisgreene/Tomahawk" alt="GitHub License" />
+  <img src="https://img.shields.io/badge/dynamic/json?url=https://raw.githubusercontent.com/patrickisgreene/Tomahawk/refs/heads/master/package.json&query=$.dependencies.@tauri-apps/api&label=tauri&logo=tauri" alt="Tauri Version" />
+    <img src="https://img.shields.io/badge/dynamic/json?url=https://raw.githubusercontent.com/patrickisgreene/Tomahawk/refs/heads/master/package.json&query=$.dependencies.vue&label=vue&logo=javascript" alt="Vue Version" />
+</p>
+
+
 Tomahawk is a desktop application for working with HTTP access logs at scale. It is built for teams and operators who need to inspect raw web traffic, find suspicious requests, filter noisy log streams, and understand where problems are coming from.
 
 The app combines a native Rust + Tauri backend with a Vue 3 frontend. It reads Apache-style access logs from files or directories, keeps per-source SQLite databases, parses and enriches rows, and exposes a live dashboard for investigation.
