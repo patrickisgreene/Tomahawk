@@ -201,6 +201,3 @@ The project was scaffolded with Tauri/Vite defaults, but the app logic is center
 
 This project is actively evolving around the real log-analysis workflow. The primary experience is the desktop Monitor view, where you can add sources, resync files, inspect rows, classify suspicious traffic, and work through a live filtered access log.
 
-## License
-
-This project is not currently documented with a project-wide license file. If you plan to distribute or reuse the code, confirm the intended licensing before publishing builds or shipping modified binaries.
