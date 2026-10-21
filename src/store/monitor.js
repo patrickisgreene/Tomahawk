@@ -956,9 +956,9 @@ togglePanel(side) {
       this.rowContextMenu = null;
     },
     // ---- global (fallback) context menu ----
-    openGlobalContextMenu(x, y) {
+    openGlobalContextMenu(x, y, file = null) {
       this.rowContextMenu = null;
-      this.globalContextMenu = { x, y };
+      this.globalContextMenu = { x, y, file };
     },
     closeGlobalContextMenu() {
       this.globalContextMenu = null;

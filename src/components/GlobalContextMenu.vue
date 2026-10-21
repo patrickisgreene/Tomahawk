@@ -17,6 +17,18 @@ const MENU_WIDTH = 180;
 const menuRef = ref(null);
 const menuStyle = ref({});
 
+function formatFileTimestamp(ts) {
+  if (ts == null) return "No parsed entries";
+  return new Intl.DateTimeFormat(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(new Date(ts));
+}
+
 function reposition() {
   const anchor = store.globalContextMenu;
   if (!anchor) return;
@@ -46,6 +58,14 @@ function inspect() {
 <template>
   <div class="popup-backdrop" @click="store.closeGlobalContextMenu()"></div>
   <div ref="menuRef" class="popover ctx-menu" :style="menuStyle" @click.stop>
+    <template v-if="store.globalContextMenu?.file">
+      <div class="ctx-file-name">{{ store.globalContextMenu.file.name }}</div>
+      <div class="ctx-file-range">
+        <div>First log: {{ formatFileTimestamp(store.globalContextMenu.file.firstTs) }}</div>
+        <div>Last log: {{ formatFileTimestamp(store.globalContextMenu.file.lastTs) }}</div>
+      </div>
+      <div class="ctx-divider"></div>
+    </template>
     <div class="dropdown-item" @click="inspect"><i class="ph ph-code"></i>Inspect</div>
   </div>
 </template>

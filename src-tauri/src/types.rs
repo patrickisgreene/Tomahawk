@@ -59,6 +59,7 @@ pub struct SourceFileSummary {
     pub name: String,
     pub path: String,
     pub row_count: i64,
+    pub first_ts: Option<i64>,
     pub last_ts: Option<i64>,
     /// cursors.done — fully ingested (rotated/gz archive) vs still growing.
     pub done: bool,

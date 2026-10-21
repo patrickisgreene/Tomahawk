@@ -109,6 +109,7 @@ fn fast_summarize(source: &SourceConfig) -> SourceSummary {
                 name,
                 path: path_str,
                 row_count: 0,
+                first_ts: None,
                 last_ts: None,
                 done: false,
             }
@@ -1132,13 +1133,13 @@ fn compute_stats(source: &SourceConfig) -> Result<(i64, Option<i64>, Vec<SourceF
     for path in files_for_source(source).unwrap_or_default() {
         let path_str = path.to_string_lossy().to_string();
         let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| path_str.clone());
-        let (file_rows, file_last_ts): (i64, Option<i64>) = conn
+        let (file_rows, file_first_ts, file_last_ts): (i64, Option<i64>, Option<i64>) = conn
             .query_row(
-                "SELECT COUNT(*), MAX(ts) FROM access_rows WHERE file_path = ?1",
+                "SELECT COUNT(*), MIN(ts), MAX(ts) FROM access_rows WHERE file_path = ?1",
                 [path_str.as_str()],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
-            .unwrap_or((0, None));
+            .unwrap_or((0, None, None));
         let done: bool = conn
             .query_row("SELECT done FROM cursors WHERE file_path = ?1", [path_str.as_str()], |row| {
                 row.get::<_, i64>(0)
@@ -1149,6 +1150,7 @@ fn compute_stats(source: &SourceConfig) -> Result<(i64, Option<i64>, Vec<SourceF
             name,
             path: path_str,
             row_count: file_rows,
+            first_ts: file_first_ts,
             last_ts: file_last_ts,
             done,
         });

@@ -1,7 +1,7 @@
 <script setup>
 import { ref } from "vue";
 import { useMonitorStore } from "../store/monitor";
-import { formatRelative } from "../data/format";
+import { formatRelative, formatTimestamp } from "../data/format";
 import ConfirmDialog from "./ConfirmDialog.vue";
 
 const store = useMonitorStore();
@@ -26,6 +26,17 @@ function confirmRemove() {
   if (pendingRemove.value) store.removeSource(pendingRemove.value.id);
   pendingRemove.value = null;
 }
+function fileTooltip(file) {
+  if (file.firstTs == null || file.lastTs == null) return "No parsed log entries yet";
+  return `First log: ${formatTimestamp(file.firstTs)}\nLast log: ${formatTimestamp(file.lastTs)}`;
+}
+function onFileContextMenu(file, event) {
+  store.openGlobalContextMenu(event.clientX, event.clientY, {
+    name: file.name,
+    firstTs: file.firstTs,
+    lastTs: file.lastTs,
+  });
+}
 </script>
 
 <template>
@@ -40,7 +51,7 @@ function confirmRemove() {
     <div class="tree">
       <div v-if="!store.filteredSources.length" class="tree-row dim">No sources added yet.</div>
       <template v-for="source in store.filteredSources" :key="source.id">
-        <div class="tree-row" :class="{ hidden: source.hidden }" @click="onRowClick(source)">
+        <div class="tree-row" :class="{ hidden: source.hidden }" @click="onRowClick(source)" @contextmenu.prevent.stop="source.kind === 'file' && source.files[0] ? onFileContextMenu(source.files[0], $event) : null">
           <i
             v-if="source.kind === 'directory' && source.files.length"
             class="ph"
@@ -66,7 +77,7 @@ function confirmRemove() {
           class="tree-children"
           :class="{ collapsed: !isExpanded(source.id) }"
         >
-          <div v-for="f in source.files" :key="f.path" class="tree-row file">
+          <div v-for="f in source.files" :key="f.path" class="tree-row file" @contextmenu.prevent.stop="onFileContextMenu(f, $event)">
             <i class="ph ph-file-text" style="color:var(--color-neutral-600)"></i>
             <span>{{ f.name }}</span>
             <i v-if="store.isFileLoading(source.id, f.path)" class="ph ph-spinner spin file-loading" title="Loading this file"></i>
