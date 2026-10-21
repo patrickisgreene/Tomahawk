@@ -8,13 +8,13 @@ const store = useMonitorStore();
 const pendingRemove = ref(null);
 
 function iconFor(source) {
-  return source.kind === "directory" ? "ph-folder" : "ph-file-text";
+  return source.kind === "directory" || source.kind === "sftp" ? "ph-folder" : "ph-file-text";
 }
 function isExpanded(id) {
   return store.expandedSourceIds.includes(id);
 }
 function onRowClick(source) {
-  if (source.kind === "directory" && source.files.length) store.toggleSourceExpanded(source.id);
+  if ((source.kind === "directory" || source.kind === "sftp") && source.files.length) store.toggleSourceExpanded(source.id);
 }
 function onRemove(source) {
   pendingRemove.value = source;
@@ -53,7 +53,7 @@ function onFileContextMenu(file, event) {
       <template v-for="source in store.filteredSources" :key="source.id">
         <div class="tree-row" :class="{ hidden: source.hidden }" @click="onRowClick(source)" @contextmenu.prevent.stop="source.kind === 'file' && source.files[0] ? onFileContextMenu(source.files[0], $event) : null">
           <i
-            v-if="source.kind === 'directory' && source.files.length"
+            v-if="(source.kind === 'directory' || source.kind === 'sftp') && source.files.length"
             class="ph"
             :class="isExpanded(source.id) ? 'ph-caret-down' : 'ph-caret-right'"
           ></i>
@@ -73,7 +73,7 @@ function onFileContextMenu(file, event) {
           </span>
         </div>
         <div
-          v-if="source.kind === 'directory' && source.files.length"
+          v-if="(source.kind === 'directory' || source.kind === 'sftp') && source.files.length"
           class="tree-children"
           :class="{ collapsed: !isExpanded(source.id) }"
         >

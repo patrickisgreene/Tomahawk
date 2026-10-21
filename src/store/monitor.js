@@ -56,6 +56,7 @@ function persistedSettings(store) {
     displayTimezone: store.displayTimezone,
     timeDisplayFormat: store.timeDisplayFormat,
     defaultLogFormat: store.defaultLogFormat,
+    resyncIntervalMs: store.resyncIntervalMs,
     inspectorShowAllFields: store.inspectorShowAllFields,
     inspectorSectionOrder: store.inspectorSectionOrder,
     localRules: store.localRules,
@@ -369,7 +370,7 @@ export const useMonitorStore = defineStore("monitor", {
     // app-wide; see App.vue's document-level "contextmenu" listener).
     globalContextMenu: null,
     accessColumnLayout: normalizeAccessColumnLayout(),
-    resyncIntervalMs: 1800000,
+    resyncIntervalMs: INITIAL_SETTINGS.resyncIntervalMs || 1800000,
     lastSyncedAt: Date.now(),
     syncError: null,
     isSyncing: false,
@@ -422,7 +423,7 @@ export const useMonitorStore = defineStore("monitor", {
     // ---- docks: which panels are open where, and which is focused ----
     dockTabs: {
       stream: ["access"],
-      bottom: ["query", "alerts"],
+      bottom: ["query", "alerts", "wordpressThreats"],
       inspector: ["inspector", "history"],
       sources: ["sources", "saved"],
       talkers: [],
@@ -444,7 +445,12 @@ export const useMonitorStore = defineStore("monitor", {
 
     // ---- add source dialog (t2) ----
     showAddSourceDialog: false,
-    addSourceTab: "file", // file | directory
+    addSourceTab: "file", // file | directory | sftp
+    addSourceSftpHost: "",
+    addSourceSftpPort: 22,
+    addSourceSftpUsername: "",
+    addSourceSftpPassword: "",
+    addSourceSftpPath: "/",
     addSourceRealPath: null, // absolute path currently browsed; null until first loaded
     addSourceError: null,
     addSourceListing: [],
@@ -1088,11 +1094,12 @@ togglePanel(side) {
           const rows = await source.pull();
           appendRecentRows(this, rows);
         } else {
-          this.syncProgress = { total: ids.length, completed: 0 };
+          this.syncProgress = { total: ids.length, completed: 0, phase: "Preparing log sources…" };
           // Fill in real counts/cursors before pulling, so the tree shows what
           // is already imported and fully-ingested files can be skipped fast.
           await this.refreshSourceStats();
           for (const id of ids) {
+            this.syncProgress.phase = `Loading ${this.sources.find((s) => s.id === id)?.label || "source"}…`;
             const info = this.sources.find((s) => s.id === id);
             const files = info?.files?.length ? info.files : null;
             if (!files || !isTauri()) {
@@ -1153,6 +1160,7 @@ togglePanel(side) {
     },
     setResyncInterval(ms) {
       this.resyncIntervalMs = ms;
+      saveSettings(persistedSettings(this));
       if (this._resyncTimer) this.startAutoResync();
     },
     startAutoResync() {
@@ -1386,6 +1394,9 @@ togglePanel(side) {
     setAddSourceTab(tab) {
       this.addSourceTab = tab;
     },
+    setAddSourceSftpField(field, value) {
+      this[field] = value;
+    },
     // Loads a directory's contents into the File/Directory tabs' shared
     // browser. `path` null means "start from the home directory".
     async browseAddSourceDir(path) {
@@ -1454,7 +1465,16 @@ togglePanel(side) {
     },
     async confirmAddSource() {
       if (this.addSourceSaving) return;
-      const kind = this.addSourceTab; // "file" | "directory"
+      const kind = this.addSourceTab;
+      if (kind === "sftp") {
+        this.addSourceSaving = true;
+        this.addSourceError = null;
+        try {
+          await addSourceApi({ kind, label: `${this.addSourceSftpHost}:${this.addSourceSftpPath}`, path: this.addSourceSftpPath, pattern: this.addSourcePattern, logFormat: this.defaultLogFormat, host: this.addSourceSftpHost, port: Number(this.addSourceSftpPort) || 22, username: this.addSourceSftpUsername, password: this.addSourceSftpPassword });
+          await this.loadSources(); this.showAddSourceDialog = false; this.resyncNow().catch(() => {});
+        } catch (error) { this.addSourceError = String(error); } finally { this.addSourceSaving = false; }
+        return;
+      }
       const path = kind === "file" ? joinLocalPath(this.addSourceRealPath, this.addSourceSelected) : this.addSourceRealPath;
       const label = kind === "file" ? this.addSourceSelected : localPathCrumbs(path).at(-1)?.label || path;
       this.addSourceSaving = true;

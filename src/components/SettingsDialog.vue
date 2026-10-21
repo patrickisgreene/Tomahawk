@@ -68,6 +68,10 @@ const builtInRules = BUILT_IN_RULES.map((rule) => ({
             <div>
               <div class="settings-group-label">Timezone & time</div>
               <div class="settings-row">
+                <div><div>Check for new log files</div><div class="settings-sub">Applies to local and SFTP sources.</div></div>
+                <AppSelect :model-value="store.resyncIntervalMs" :options="[{value:300000,label:'Every 5 minutes'},{value:900000,label:'Every 15 minutes'},{value:1800000,label:'Every 30 minutes'},{value:3600000,label:'Every hour'}]" aria-label="Log check interval" :menu-width="180" @update:model-value="store.setResyncInterval(Number($event))" />
+              </div>
+              <div class="settings-row">
                 <span>Display timezone</span>
                 <div class="seg-strip boxed">
                   <span
@@ -130,7 +134,8 @@ const builtInRules = BUILT_IN_RULES.map((rule) => ({
               </label>
             </div>
             <div>
-              <div class="settings-group-label">Built-In Rule Visibility</div>
+                <div class="settings-group-label">Built-In Rule Visibility</div>
+                <div class="settings-sub" style="margin:-4px 0 8px">Includes WordPress probes for XML-RPC, REST API, plugin, theme, sitemap, cron, and installation activity.</div>
               <div class="settings-rule-grid">
                 <button
                   v-for="rule in builtInRules"

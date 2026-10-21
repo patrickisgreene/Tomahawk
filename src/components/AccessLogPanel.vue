@@ -280,7 +280,10 @@ onUnmounted(() => {
         </div>
       </div>
     </div>
-    <div v-if="store.syncProgress" class="sync-progress-bar"><div :style="{ width: store.syncProgress.completed / store.syncProgress.total * 100 + '%' }"></div></div>
+    <div v-if="store.syncProgress" class="sync-progress-wrap">
+      <div class="sync-progress-label"><i class="ph ph-spinner spin"></i>{{ store.syncProgress.phase || "Loading log files…" }}</div>
+      <div class="sync-progress-bar"><div :class="{ indeterminate: store.syncProgress.completed === 0 }" :style="store.syncProgress.completed ? { width: store.syncProgress.completed / store.syncProgress.total * 100 + '%' } : {}"></div></div>
+    </div>
     <div v-if="store.syncError" role="alert" class="access-message">{{ store.syncError }}</div>
     <div class="access-scroll" ref="scrollRef" @scroll="onTableScroll">
       <div class="tail-head access-head" :style="gridStyle">

@@ -192,6 +192,7 @@ export const alertRules = [
 // ---- Panel picker (t3) — the catalog shown in the "+" popover, grouped. ----
 export const panelCatalog = [
   { group: "Streams", items: [
+    { id: "wordpressThreats", icon: "ph-shield-warning", name: "WordPress threats", desc: "WordPress-specific probes and suspicious activity" },
     { id: "access", icon: "ph-table", name: "Access log", desc: "Sortable, paused view of parsed request rows — resync to pull latest" },
   ] },
   { group: "Analysis", items: [

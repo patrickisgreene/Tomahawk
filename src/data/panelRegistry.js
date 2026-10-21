@@ -9,6 +9,7 @@ import ThroughputContent from "../components/ThroughputContent.vue";
 import StatusMixContent from "../components/StatusMixContent.vue";
 import MethodMixContent from "../components/MethodMixContent.vue";
 import SavedFiltersPanel from "../components/SavedFiltersPanel.vue";
+import WordPressThreatsPanel from "../components/WordPressThreatsPanel.vue";
 
 // Every panel a dock can host, keyed by the same id used in panelCatalog
 // (src/data/mock.js) and in each dock's `dockTabs` list (store/monitor.js).
@@ -24,4 +25,5 @@ export const PANEL_REGISTRY = {
   mix: { icon: "ph-faders", label: "Status", component: StatusMixContent },
   methods: { icon: "ph-arrows-left-right", label: "Methods", component: MethodMixContent },
   saved: { icon: "ph-bookmark-simple", label: "Saved filters", component: SavedFiltersPanel },
+  wordpressThreats: { icon: "ph-shield-warning", label: "WordPress threats", component: WordPressThreatsPanel },
 };

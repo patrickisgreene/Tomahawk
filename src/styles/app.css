@@ -244,8 +244,12 @@
   @keyframes skel-pulse{0%,100%{opacity:1}50%{opacity:.5}}
   .skel-bar{height:9px;border-radius:3px;background:#242737;animation:skel-pulse 1.4s ease-in-out infinite}
   .tail-row.skel,.file-row.skel{cursor:default}
+  .sync-progress-wrap{flex:none;background:var(--chrome-bg);padding:4px 10px 5px}
+  .sync-progress-label{font-size:11px;color:var(--color-neutral-500);display:flex;align-items:center;gap:5px;margin-bottom:3px}
   .sync-progress-bar{height:2px;background:var(--chrome-border);overflow:hidden;flex:none}
   .sync-progress-bar>div{height:100%;background:var(--color-accent-500);transition:width .2s}
+  .sync-progress-bar>div.indeterminate{width:35%;animation:sync-progress-slide 1.2s ease-in-out infinite}
+  @keyframes sync-progress-slide{0%{transform:translateX(-100%)}100%{transform:translateX(300%)}}
 
   /* ===== error/query/alerts dock ===== */
   .query-row{display:flex;align-items:center;gap:5px;height:28px;padding:0 6px;border-bottom:1px solid var(--chrome-border);flex:none}
@@ -281,6 +285,9 @@
   .app-select-option.disabled{opacity:.45;cursor:default}
 
   .alerts-list{flex:1;min-height:0;overflow:auto;padding:8px 10px;display:flex;flex-direction:column;gap:6px}
+  .decode-menu{position:fixed;z-index:240;min-width:170px}
+  .decode-result{margin:6px 8px;padding:5px 6px;white-space:pre-wrap;overflow-wrap:anywhere;background:var(--chrome-bg);border:1px solid var(--chrome-border-2);color:var(--color-neutral-200);font:400 10.5px/1.35 ui-monospace,Menlo,monospace;user-select:text}
+  .wordpress-threat-list{flex:1;min-height:0;overflow:auto;padding:0 10px 10px;display:flex;flex-direction:column;gap:6px}
   .alert-row{display:flex;align-items:center;gap:7px;padding:6px 8px;border-radius:var(--radius-sm);border:1px solid var(--chrome-border)}
   .alert-row.firing{background:var(--danger-bg);border-color:var(--danger-border)}
   .alert-row.warn{background:var(--warn-bg);border-color:var(--warn-border)}

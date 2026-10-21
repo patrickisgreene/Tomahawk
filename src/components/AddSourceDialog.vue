@@ -7,6 +7,7 @@ const store = useMonitorStore();
 const TABS = [
   { id: "file", icon: "ph-file-text", label: "File" },
   { id: "directory", icon: "ph-folder", label: "Directory" },
+  { id: "sftp", icon: "ph-cloud-arrow-down", label: "SFTP" },
 ];
 
 const crumbs = computed(() => localPathCrumbs(store.addSourceRealPath));
@@ -14,6 +15,7 @@ const canConfirm = computed(() => {
   if (store.addSourceSaving) return false;
   if (store.addSourceTab === "file") return !!store.addSourceSelected;
   if (store.addSourceTab === "directory") return !!store.addSourceRealPath;
+  if (store.addSourceTab === "sftp") return !!store.addSourceSftpHost && !!store.addSourceSftpUsername && !!store.addSourceSftpPath;
   return false;
 });
 
@@ -29,6 +31,19 @@ function iconFor(kind) {
         <i class="ph ph-plug" style="color:var(--color-accent-400)"></i>
         <span>Add log source</span>
         <i class="ph ph-x" :style="{ marginLeft: 'auto', cursor: store.addSourceSaving ? 'default' : 'pointer', color: 'var(--color-neutral-500)', opacity: store.addSourceSaving ? 0.45 : 1 }" @click="store.closeAddSourceDialog()"></i>
+      </div>
+
+      <div v-if="store.addSourceTab === 'sftp'" class="modal-body" style="gap:12px">
+        <div class="settings-group-label">Remote SFTP folder</div>
+        <div style="display:grid;grid-template-columns:1fr 90px;gap:8px">
+          <input class="settings-input" placeholder="Host" :value="store.addSourceSftpHost" @input="store.setAddSourceSftpField('addSourceSftpHost', $event.target.value)">
+          <input class="settings-input" type="number" min="1" placeholder="Port" :value="store.addSourceSftpPort" @input="store.setAddSourceSftpField('addSourceSftpPort', $event.target.value)">
+        </div>
+        <input class="settings-input" placeholder="Username" :value="store.addSourceSftpUsername" @input="store.setAddSourceSftpField('addSourceSftpUsername', $event.target.value)">
+        <input class="settings-input" type="password" placeholder="Password" :value="store.addSourceSftpPassword" @input="store.setAddSourceSftpField('addSourceSftpPassword', $event.target.value)">
+        <input class="settings-input" placeholder="Remote folder, e.g. /var/log/httpd" :value="store.addSourceSftpPath" @input="store.setAddSourceSftpField('addSourceSftpPath', $event.target.value)">
+        <input class="settings-input" placeholder="Match files, e.g. access.log*" :value="store.addSourcePattern" @input="store.setAddSourcePattern($event.target.value)">
+        <div class="hint-line"><i class="ph ph-info"></i>The folder is scanned automatically using the resync interval in Settings.</div>
       </div>
 
       <div style="padding:12px 16px 0">
@@ -155,7 +170,7 @@ function iconFor(kind) {
       </div>
 
       <div class="modal-footer">
-        <span v-if="store.addSourceError" role="alert" style="margin-right:auto;overflow-wrap:anywhere">{{ store.addSourceError }}</span>
+        <span v-if="store.addSourceError" role="alert" style="margin-right:auto;overflow-wrap:anywhere;color:var(--color-danger-400, #f87171)">{{ store.addSourceError }}</span>
         <button class="btn-plain" :disabled="store.addSourceSaving" :style="store.addSourceSaving ? { opacity: 0.5, cursor: 'default' } : {}" @click="store.closeAddSourceDialog()">Cancel</button>
         <button class="chip outline" :style="canConfirm ? {} : { opacity: 0.5, cursor: 'default' }" :disabled="!canConfirm" @click="store.confirmAddSource()">
           <i class="ph" :class="store.addSourceSaving ? 'ph-spinner spin' : 'ph-plus'"></i>{{ store.addSourceSaving ? "Adding..." : "Add source" }}

@@ -137,6 +137,19 @@ export const BUILT_IN_RULES = [
     /\?author=\d+/i.test(s)
   },
 
+  // WordPress-specific reconnaissance. These paths are useful signals when
+  // they are probed directly, especially on sites that do not expose the
+  // corresponding feature. Ordinary wp-admin and wp-login traffic remains
+  // covered by the broader login-probe rule above.
+  { label: "WordPress probe", severity: "warn", scope: "url", test: (s) =>
+    /(?:^|\/)wp-(?:cron|comments-post|trackback|links-opml|mail)\.php(?:\?|$)/i.test(s) ||
+    /(?:^|\/)(?:wp-sitemap(?:-index)?\.xml|readme\.html|license\.txt)(?:\?|$)/i.test(s) ||
+    /(?:^|\/)wp-(?:admin\/install|includes|content\/(?:plugins|themes))\//i.test(s) ||
+    /(?:^|\/)xmlrpc\.php(?:\?|$)/i.test(s) ||
+    /(?:^|\/)(?:wp-json|wp-json\/wp\/v2)(?:\/|\?|$)/i.test(s) ||
+    /(?:^|\/)wp-content\/(?:plugins|themes)\/[^/?]+\/[^?]*(?:readme|changelog|license|composer\.json|package\.json)(?:\?|$)/i.test(s)
+  },
+
   // Known scanner/attack tooling announcing itself in the user agent.
   { label: "scanner", severity: "warn", scope: "ua", test: (s) =>
     /\b(?:sqlmap|nmap|nikto|nessus|masscan|zgrab|acunetix|openvas|wpscan|dirbuster|gobuster|nuclei|ffuf|wfuzz|hydra|metasploit|patator|wafw00f|jaeles|xray|arjun|fscan|zmap)\b/i.test(s) ||

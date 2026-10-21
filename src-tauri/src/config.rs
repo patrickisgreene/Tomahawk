@@ -32,6 +32,7 @@ pub fn source_db_path(source_id: &str) -> Result<PathBuf, String> {
 pub enum SourceKind {
     File,
     Directory,
+    Sftp,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,6 +43,10 @@ pub struct SourceConfig {
     pub label: String,
     /// File kind: path to the log file. Directory kind: the root directory.
     pub path: String,
+    #[serde(default)] pub host: String,
+    #[serde(default)] pub port: u16,
+    #[serde(default)] pub username: String,
+    #[serde(default)] pub password: String,
     /// Directory kind only: glob matched against file names in the directory.
     #[serde(default = "default_pattern")]
     pub pattern: String,

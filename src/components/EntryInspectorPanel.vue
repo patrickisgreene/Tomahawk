@@ -14,6 +14,9 @@ const inspectorSettingsButton = ref(null);
 const inspectorSettingsAnchor = ref({ right: 12, top: 60 });
 const draggedInspectorSection = ref(null);
 const dragOverInspectorSection = ref(null);
+const selectedText = ref("");
+const decodedText = ref("");
+const decodeMenu = ref(null);
 const inspectorSections = [
   { id: "logged", label: "Log fields" },
   { id: "tags", label: "Tags" },
@@ -61,6 +64,32 @@ function endInspectorSectionDrag() {
   draggedInspectorSection.value = null;
   dragOverInspectorSection.value = null;
 }
+function captureSelection() {
+  const selection = window.getSelection();
+  const text = selection?.toString().trim() || "";
+  selectedText.value = text;
+  decodedText.value = "";
+}
+function openDecodeMenu(event) {
+  captureSelection();
+  if (!selectedText.value) return;
+  decodeMenu.value = { x: event.clientX, y: event.clientY };
+}
+function closeDecodeMenu() { decodeMenu.value = null; }
+function decodeSelection(kind) {
+  if (!selectedText.value) return;
+  try {
+    if (kind === "url") decodedText.value = decodeURIComponent(selectedText.value);
+    else {
+      const binary = atob(selectedText.value.replace(/\s/g, ""));
+      const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+      decodedText.value = new TextDecoder().decode(bytes);
+    }
+    } catch {
+    decodedText.value = "Unable to decode this selection.";
+    }
+    decodeMenu.value = null;
+  }
 
 const r = computed(() => store.selectedRow);
 const info = computed(() => (r.value ? clientInfo(r.value.ip) : null));
@@ -346,13 +375,22 @@ watch(
           <i class="ph ph-code" style="color:var(--color-accent-400)"></i>Raw line
           <i class="ph ph-copy" style="color:var(--color-neutral-600);margin-left:auto"></i>
         </div>
-        <div v-if="!collapsed.raw" class="raw-line">
+        <div v-if="!collapsed.raw" class="raw-line" @mouseup="captureSelection" @contextmenu.prevent.stop="openDecodeMenu">
           <template v-for="(part, i) in rawLineParts" :key="i">
             <span v-if="part.highlight" :style="{ color: statusColor(r.status) }">{{ part.text }}</span>
             <template v-else>{{ part.text }}</template>
           </template>
         </div>
+        <div v-if="decodedText" class="decode-result">{{ decodedText }}</div>
       </div>
     </div>
+    <Teleport to="body">
+      <div v-if="decodeMenu" class="popup-backdrop" @click="closeDecodeMenu"></div>
+      <div v-if="decodeMenu" class="popover decode-menu" :style="{ left: decodeMenu.x + 'px', top: decodeMenu.y + 'px' }" @click.stop>
+        <div class="popover-group-label">Decode selected text</div>
+        <div class="dropdown-item" @click="decodeSelection('url')"><i class="ph ph-link"></i>URL decode</div>
+        <div class="dropdown-item" @click="decodeSelection('base64')"><i class="ph ph-brackets-curly"></i>Base64 decode</div>
+      </div>
+    </Teleport>
   </div>
 </template>

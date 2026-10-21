@@ -24,6 +24,10 @@ pub struct AddSourceInput {
     pub pattern: Option<String>,
     pub include_subfolders: Option<bool>,
     pub log_format: Option<String>,
+    pub host: Option<String>,
+    pub port: Option<u16>,
+    pub username: Option<String>,
+    pub password: Option<String>,
 }
 
 #[tauri::command]
@@ -31,6 +35,7 @@ pub fn add_source(input: AddSourceInput) -> Result<SourceSummary, String> {
     let kind = match input.kind.as_str() {
         "file" => SourceKind::File,
         "directory" => SourceKind::Directory,
+        "sftp" => SourceKind::Sftp,
         other => return Err(format!("unknown source kind: {other}")),
     };
 
@@ -40,6 +45,10 @@ pub fn add_source(input: AddSourceInput) -> Result<SourceSummary, String> {
         kind,
         label: input.label,
         path: input.path,
+        host: input.host.unwrap_or_default(),
+        port: input.port.unwrap_or(22),
+        username: input.username.unwrap_or_default(),
+        password: input.password.unwrap_or_default(),
         pattern: input.pattern.unwrap_or_else(|| "access.log*".to_string()),
         include_subfolders: input.include_subfolders.unwrap_or(false),
         log_format: input.log_format.unwrap_or_else(|| "apache_combined".to_string()),
@@ -47,7 +56,7 @@ pub fn add_source(input: AddSourceInput) -> Result<SourceSummary, String> {
     };
 
     // Fail fast if the path isn't readable, before it's persisted.
-    files_for_source(&source)?;
+    if source.kind != SourceKind::Sftp { files_for_source(&source)?; }
     db::open_source_db(&source.id)?; // creates schema so it's ready for the first pull
 
     let summary = summarize(&source);
@@ -97,6 +106,7 @@ fn fast_summarize(source: &SourceConfig) -> SourceSummary {
     let kind = match source.kind {
         SourceKind::File => "file",
         SourceKind::Directory => "directory",
+        SourceKind::Sftp => "sftp",
     }
     .to_string();
     let files = files_for_source(source)
@@ -1051,9 +1061,14 @@ fn pull_new_rows_impl(source_ids: Option<Vec<String>>) -> Result<Vec<AccessLogRo
     let mut all_rows = Vec::new();
     for source in sources {
         let mut conn = db::open_source_db(&source.id)?;
-        for file in files_for_source(source)? {
+        let files = if source.kind == SourceKind::Sftp { sync_sftp_files(source)? } else { files_for_source(source)? };
+        for file in files {
             let rows = ingest::ingest_access_file(&mut conn, &source.id, &file)?;
             all_rows.extend(rows);
+            if is_compressed_archive(&file) && ingest::cursor_done(&conn, &file.to_string_lossy()) {
+                let marker = archive_done_marker(&file);
+                let _ = std::fs::write(marker, b"done");
+            }
         }
         if all_rows.len() as i64 > MAX_PULL_ROWS {
             all_rows.drain(0..all_rows.len() - MAX_PULL_ROWS as usize);
@@ -1100,6 +1115,7 @@ fn summarize(source: &SourceConfig) -> SourceSummary {
     let kind = match source.kind {
         SourceKind::File => "file",
         SourceKind::Directory => "directory",
+        SourceKind::Sftp => "sftp",
     }
     .to_string();
 
@@ -1166,7 +1182,73 @@ fn files_for_source(source: &SourceConfig) -> Result<Vec<PathBuf>, String> {
             collect_matching_files(Path::new(&source.path), &source.pattern, source.include_subfolders, &mut matches)?;
             Ok(matches)
         }
+        SourceKind::Sftp => {
+            let cache = crate::config::data_dir()?.join("sftp-cache").join(&source.id);
+            if !cache.exists() { return Ok(Vec::new()); }
+            let mut files = Vec::new();
+            for entry in std::fs::read_dir(cache).map_err(|e| e.to_string())? {
+                let path = entry.map_err(|e| e.to_string())?.path();
+                if path.is_file() {
+                    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+                    if glob_matches(&source.pattern, name) { files.push(path); }
+                }
+            }
+            Ok(files)
+        }
     }
+}
+
+fn sync_sftp_files(source: &SourceConfig) -> Result<Vec<PathBuf>, String> {
+    let source = source.clone();
+    tauri::async_runtime::block_on(async move { sync_sftp_files_async(&source).await })
+}
+
+async fn sync_sftp_files_async(source: &SourceConfig) -> Result<Vec<PathBuf>, String> {
+    use russh::client::Handler;
+    use russh_sftp::client::SftpSession;
+    use std::sync::Arc;
+    use tokio::io::AsyncReadExt;
+
+    struct SftpHandler;
+    impl Handler for SftpHandler {
+        type Error = russh::Error;
+        async fn check_server_key(&mut self, _key: &russh::keys::PublicKey) -> Result<bool, Self::Error> { Ok(true) }
+    }
+
+    let port = if source.port == 0 { 22 } else { source.port };
+    let endpoint = format!("{}:{}", source.host, port);
+    let config = russh::client::Config::default();
+    let mut session = russh::client::connect(Arc::new(config), (source.host.as_str(), port), SftpHandler)
+        .await.map_err(|e| format!("SFTP connection to {endpoint} failed: {e}"))?;
+    let auth = session.authenticate_password(&source.username, &source.password)
+        .await.map_err(|e| format!("SFTP authentication for {endpoint} failed: {e}"))?;
+    if !auth.success() { return Err(format!("SFTP authentication for {endpoint} was rejected")); }
+    let channel = session.channel_open_session().await.map_err(|e| format!("SFTP channel for {endpoint} failed: {e}"))?;
+    channel.request_subsystem(true, "sftp").await.map_err(|e| format!("SFTP subsystem request for {endpoint} failed: {e}"))?;
+    let sftp = SftpSession::new(channel.into_stream()).await.map_err(|e| format!("SFTP subsystem for {endpoint} failed: {e}"))?;
+    let cache = crate::config::data_dir()?.join("sftp-cache").join(&source.id);
+    std::fs::create_dir_all(&cache).map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for entry in sftp.read_dir(&source.path).await.map_err(|e| format!("Cannot list SFTP folder {}: {e}", source.path))? {
+        let name = entry.file_name();
+        if entry.metadata().is_dir() { continue; }
+        if !glob_matches(&source.pattern, &name) { continue; }
+        let local = cache.join(name);
+        if is_compressed_archive(&local) && archive_done_marker(&local).exists() { continue; }
+        let mut input = sftp.open(entry.path()).await.map_err(|e| e.to_string())?;
+        let mut bytes = Vec::new(); input.read_to_end(&mut bytes).await.map_err(|e| e.to_string())?;
+        std::fs::write(&local, bytes).map_err(|e| e.to_string())?;
+        out.push(local);
+    }
+    Ok(out)
+}
+
+fn is_compressed_archive(path: &Path) -> bool {
+    path.extension().and_then(|e| e.to_str()).map(|e| e.eq_ignore_ascii_case("gz")).unwrap_or(false)
+}
+
+fn archive_done_marker(path: &Path) -> PathBuf {
+    PathBuf::from(format!("{}.done", path.display()))
 }
 
 fn collect_matching_files(dir: &Path, pattern: &str, recurse: bool, out: &mut Vec<PathBuf>) -> Result<(), String> {
