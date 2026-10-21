@@ -19,6 +19,9 @@ pub fn data_dir() -> Result<PathBuf, String> {
 /// Where a source's own SQLite database lives — one file per source, so
 /// removing a source is just deleting this path.
 pub fn source_db_path(source_id: &str) -> Result<PathBuf, String> {
+    if !source_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') || source_id.is_empty() {
+        return Err("invalid source id".to_string());
+    }
     let dir = data_dir()?.join("sources");
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir.join(format!("{source_id}.db")))

@@ -618,7 +618,7 @@ fn build_box_filters(input: &QueryInput, min_ts: Option<i64>) -> (Vec<String>, V
                 }
             } else {
                 for col in ALL_QUERY_COLUMNS {
-                    parts.push(format!("COALESCE(CAST({col} AS TEXT),'') LIKE ? ESCAPE '\\'"));
+                    parts.push(format!("LOWER(COALESCE(CAST({col} AS TEXT),'')) LIKE ? ESCAPE '\\'"));
                     params.push(format!("%{}%", escape_like(&needle.to_lowercase())).into());
                 }
             }

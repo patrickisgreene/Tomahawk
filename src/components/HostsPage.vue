@@ -18,6 +18,7 @@ const offline = computed(() => store.hosts.filter((h) => h.dot === "var(--st5)")
   <div class="page">
     <div class="page-header">
       <span class="page-title">Hosts</span>
+      <span class="sample-badge">Sample data</span>
       <span class="page-meta">{{ store.hosts.length }} hosts · 3 regions</span>
       <div class="filterbar" style="max-width:260px;margin-left:12px"><i class="ph ph-magnifying-glass"></i><input v-model="filterText" placeholder="Filter hosts…"></div>
       <div class="chip txt">All statuses<span class="caret">▾</span></div>

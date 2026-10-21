@@ -14,6 +14,7 @@ const STATS = [
   <div class="page">
     <div class="page-header">
       <span class="page-title">Reports</span>
+      <span class="sample-badge">Sample data</span>
       <div class="chip txt" style="margin-left:12px">Last 7 days<span class="caret">▾</span></div>
       <div class="chip txt">All vhosts<span class="caret">▾</span></div>
       <button class="chip txt" style="margin-left:auto"><i class="ph ph-download-simple"></i>Export CSV</button>

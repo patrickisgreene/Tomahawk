@@ -527,6 +527,7 @@
   .page{flex:1;min-height:0;display:flex;flex-direction:column;background:var(--color-bg);overflow:hidden}
   .page-header{display:flex;align-items:center;gap:8px;height:44px;padding:0 16px;border-bottom:1px solid var(--chrome-border);flex:none}
   .page-title{font:500 14px/1 var(--font-heading);color:var(--color-text)}
+  .sample-badge{padding:3px 7px;border:1px solid var(--chrome-border);border-radius:3px;color:var(--color-neutral-500);font:500 9px/1 var(--font-body);text-transform:uppercase;letter-spacing:.06em}
   .page-meta{font:400 11px/1 ui-monospace,Menlo,monospace;color:var(--color-neutral-600)}
   .page-scroll{flex:1;min-height:0;overflow:auto;padding:16px}
 

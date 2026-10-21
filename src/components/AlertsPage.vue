@@ -7,6 +7,7 @@ const store = useMonitorStore();
   <div class="page">
     <div class="page-header">
       <span class="page-title">Alerts</span>
+      <span class="sample-badge">Sample data</span>
       <div class="filterbar" style="max-width:220px;margin-left:12px"><i class="ph ph-magnifying-glass"></i><input placeholder="Filter rules…"></div>
       <button class="chip outline" style="margin-left:auto"><i class="ph ph-plus"></i>New alert rule</button>
     </div>

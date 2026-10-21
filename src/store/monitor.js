@@ -297,6 +297,15 @@ function compareByField(a, b, field, desc) {
   return desc ? -cmp : cmp;
 }
 
+const MAX_TAIL_ROWS = 5000;
+function appendRecentRows(store, rows) {
+  if (!rows?.length) return;
+  store.tailRows.push(...rows);
+  if (store.tailRows.length > MAX_TAIL_ROWS) {
+    store.tailRows.splice(0, store.tailRows.length - MAX_TAIL_ROWS);
+  }
+}
+
 export const useMonitorStore = defineStore("monitor", {
   state: () => ({
     // ---- top-level navigation ----
@@ -532,7 +541,7 @@ export const useMonitorStore = defineStore("monitor", {
     // already-ingested rows) rather than a lifetime average — a recent
     // window is the right basis for a "current rate" gauge.
     throughputStats(state) {
-      const rows = state.tailRows;
+      const rows = [...state.tailRows].sort((a, b) => (a.ts || 0) - (b.ts || 0));
       const N = 21;
       if (rows.length < 2) {
         return { current: 0, avg: 0, min: 0, max: 0, errorPct: 0, spark: Array(N).fill(0), errorSpark: Array(N).fill(0) };
@@ -563,7 +572,7 @@ export const useMonitorStore = defineStore("monitor", {
       };
     },
     statusMixStats(state) {
-      const rows = state.tailRows;
+      const rows = [...state.tailRows].sort((a, b) => (a.ts || 0) - (b.ts || 0));
       const counts = { c2: 0, c3: 0, c4: 0, c5: 0 };
       const msValues = [];
       for (const r of rows) {
@@ -599,7 +608,7 @@ export const useMonitorStore = defineStore("monitor", {
     // pairwise distinct under color-blindness simulation (see the --cat-*
     // comment in app.css), which caps a categorical chart at 3 hues here.
     methodMixStats(state) {
-      const rows = state.tailRows;
+      const rows = [...state.tailRows].sort((a, b) => (a.ts || 0) - (b.ts || 0));
       const counts = { get: 0, post: 0, put: 0, other: 0 };
       for (const r of rows) {
         const method = String(r.method || "").toUpperCase();
@@ -1077,7 +1086,7 @@ togglePanel(side) {
         const ids = this.sources.map((s) => s.id);
         if (!ids.length) {
           const rows = await source.pull();
-          this.tailRows.push(...rows);
+          appendRecentRows(this, rows);
         } else {
           this.syncProgress = { total: ids.length, completed: 0 };
           // Fill in real counts/cursors before pulling, so the tree shows what
@@ -1088,7 +1097,7 @@ togglePanel(side) {
             const files = info?.files?.length ? info.files : null;
             if (!files || !isTauri()) {
               const rows = await source.pull(id);
-              this.tailRows.push(...rows);
+              appendRecentRows(this, rows);
             } else {
               this.syncActiveFiles = files.map((f) => ({ sourceId: id, filePath: f.path }));
               for (const f of files) {
